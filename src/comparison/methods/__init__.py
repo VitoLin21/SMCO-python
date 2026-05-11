@@ -28,4 +28,5 @@ def get_method(name: str) -> OptimizerFn:
 
 
 # Method modules will be imported here once created:
-# from . import gd, sign_gd, spsa, adam, lbfgs, nelder_mead, bobyqa, gensa, sa, de, ga, pso
+from . import gd, sign_gd, spsa, adam  # noqa: F401
+# from . import lbfgs, nelder_mead, bobyqa, gensa, sa, de, ga, pso
