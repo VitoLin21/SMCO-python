@@ -168,3 +168,52 @@ class TestGAPSO:
     def test_all_registered(self):
         for name in ("GA", "PSO"):
             assert name in METHOD_REGISTRY
+
+
+from comparison.domain_mod import modify_domain
+from comparison.run_comparison import run_comparison, generate_unif_starts
+
+
+class TestDomainMod:
+    def test_preserves_shape(self):
+        bl = np.array([-5.0, -5.0])
+        bu = np.array([5.0, 5.0])
+        def identity(x):
+            return float(np.sum(x))
+        f_mod, new_bl, new_bu = modify_domain(identity, bl, bu, dim=2, seed=42)
+        assert new_bl.shape == (2,)
+        assert new_bu.shape == (2,)
+        assert np.all(new_bl < new_bu)
+
+    def test_output_is_scalar(self):
+        bl = np.array([-5.0, -5.0])
+        bu = np.array([5.0, 5.0])
+        f_mod, _, _ = modify_domain(_sphere_min, bl, bu, dim=2, seed=1)
+        val = f_mod(np.array([1.0, 2.0]))
+        assert isinstance(val, float)
+        assert np.isfinite(val)
+
+
+class TestRunComparison:
+    def test_generate_starts(self):
+        bl = np.array([-5.0, -5.0])
+        bu = np.array([5.0, 5.0])
+        starts = generate_unif_starts(3, bl, bu)
+        assert starts.shape == (3, 2)
+        assert np.all(starts >= bl) and np.all(starts <= bu)
+
+    def test_quick_comparison(self):
+        result = run_comparison(
+            name_config="Rastrigin",
+            dim_config=2,
+            to_maximize=True,
+            algo_names=["SMCO_R", "GD"],
+            n_replications=2,
+            smco_options={"iter_max": 50, "n_starts": 3},
+            seed=42,
+        )
+        assert len(result.algo_names) == 2
+        assert result.fopt_algo.shape == (2, 2)
+        assert "SMCO_R" in result.sum_results
+        assert "GD" in result.sum_results
+        assert "rMSE" in result.sum_results["SMCO_R"]
