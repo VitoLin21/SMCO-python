@@ -104,3 +104,67 @@ class TestAdam:
 
     def test_registered(self):
         assert "ADAM" in METHOD_REGISTRY
+
+
+from comparison.methods.lbfgs import lbfgs
+from comparison.methods.nelder_mead import nelder_mead
+from comparison.methods.bobyqa import bobyqa
+from comparison.methods.gensa import gensa
+from comparison.methods.sa import simulated_annealing
+from comparison.methods.de import differential_evo
+from comparison.methods.ga import genetic_algorithm
+from comparison.methods.pso import particle_swarm
+
+
+class TestScipyMethods:
+    @pytest.mark.parametrize("name,fn", [
+        ("optimLBFGS", lbfgs),
+        ("optimNM", nelder_mead),
+        ("BOBYQA", bobyqa),
+    ])
+    def test_minimize_sphere(self, name, fn):
+        bl = np.array([-5.0, -5.0])
+        bu = np.array([5.0, 5.0])
+        starts = np.array([[2.0, 2.0]])
+        result = fn(_sphere_min, bl, bu, starts, maximize=False, max_iter=500)
+        assert result.f_optimal < 1.0
+        assert result.x_optimal.shape == (2,)
+
+    def test_all_registered(self):
+        for name in ("optimLBFGS", "optimNM", "BOBYQA"):
+            assert name in METHOD_REGISTRY
+
+
+class TestGlobalMethods:
+    @pytest.mark.parametrize("name,fn", [
+        ("GenSA", gensa),
+        ("SA", simulated_annealing),
+        ("DEoptim", differential_evo),
+    ])
+    def test_minimize_sphere(self, name, fn):
+        bl = np.array([-5.0, -5.0])
+        bu = np.array([5.0, 5.0])
+        result = fn(_sphere_min, bl, bu, maximize=False, max_iter=50, seed=42)
+        assert result.f_optimal < 1.0
+        assert result.x_optimal.shape == (2,)
+
+    def test_all_registered(self):
+        for name in ("GenSA", "SA", "DEoptim"):
+            assert name in METHOD_REGISTRY
+
+
+class TestGAPSO:
+    @pytest.mark.parametrize("name,fn", [
+        ("GA", genetic_algorithm),
+        ("PSO", particle_swarm),
+    ])
+    def test_minimize_sphere(self, name, fn):
+        bl = np.array([-5.0, -5.0])
+        bu = np.array([5.0, 5.0])
+        result = fn(_sphere_min, bl, bu, maximize=False, max_iter=50, seed=42)
+        assert result.f_optimal < 2.0
+        assert result.x_optimal.shape == (2,)
+
+    def test_all_registered(self):
+        for name in ("GA", "PSO"):
+            assert name in METHOD_REGISTRY

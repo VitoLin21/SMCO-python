@@ -29,4 +29,11 @@ def get_method(name: str) -> OptimizerFn:
 
 # Method modules will be imported here once created:
 from . import gd, sign_gd, spsa, adam  # noqa: F401
-# from . import lbfgs, nelder_mead, bobyqa, gensa, sa, de, ga, pso
+from . import lbfgs as _lbfgs  # noqa: F401
+from . import nelder_mead as _nelder_mead  # noqa: F401
+from . import bobyqa as _bobyqa  # noqa: F401
+from . import gensa as _gensa  # noqa: F401
+from . import sa as _sa  # noqa: F401
+from . import de as _de  # noqa: F401
+from . import ga as _ga  # noqa: F401
+from . import pso as _pso  # noqa: F401
