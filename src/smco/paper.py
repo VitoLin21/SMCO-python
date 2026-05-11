@@ -16,6 +16,7 @@ def run_paper_smoke(
     seed: int | None = 123,
     **smco_options: Any,
 ) -> dict[str, BenchmarkRun]:
+    # 论文 smoke 仅做小规模可运行验证，不追求论文级统计显著性。
     options = dict(smco_options)
     options["iter_max"] = iter_max
     options["n_starts"] = n_starts

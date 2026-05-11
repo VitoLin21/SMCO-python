@@ -61,6 +61,7 @@ def run_benchmark(
     seed: int | None = 123,
     **smco_options: Any,
 ) -> BenchmarkRun:
+    # 统一入口：先解析 benchmark 配置，再按 variant 重复运行并汇总最优结果。
     config = assign_config(name, dim)
     variant_fn = _variant_function(variant)
     normalized_variant = variant.lower()
@@ -72,6 +73,7 @@ def run_benchmark(
     results: list[SMCOResult] = []
     for rep in range(repetitions):
         options = dict(base_options)
+        # 每次重复在 base seed 上偏移，保证可复现且彼此不同。
         options["seed"] = None if base_seed is None else base_seed + rep
         if normalized_variant == "smco_multi":
             result = variant_fn(

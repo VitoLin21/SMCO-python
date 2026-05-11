@@ -181,6 +181,7 @@ def _min_config(
     known_best_x = None if known_min_x is None else np.asarray(known_min_x, dtype=float)
 
     def objective(x: np.ndarray) -> float:
+        # SMCO 默认最大化，这里将原始最小化目标统一变换为 -f(x)。
         return -float(raw(x))
 
     return BenchmarkConfig(
@@ -214,6 +215,7 @@ def _validate_dim(dim: int) -> int:
 def assign_config(name: str, dim: int) -> BenchmarkConfig:
     if not isinstance(name, str):
         raise TypeError("name must be a string")
+    # 兼容上游 R 常见别名写法（含符号与大小写差异）。
     negative_sqnorm_alias = name.strip().lower() in {"-sqnorm", "- sqnorm"}
     key = _key(name)
     dim = _validate_dim(dim)
@@ -280,6 +282,7 @@ def assign_config(name: str, dim: int) -> BenchmarkConfig:
     }
     if key in two_dimensional:
         if dim != 2:
+            # 2D-only 函数在此明确限制维度，避免静默错误。
             raise ValueError(f"{name} is a 2-dimensional benchmark; dim must be 2")
         display, lower, upper, raw, known_min, known_min_x = two_dimensional[key]
         return _min_config(f"{display}2d", 2, lower, upper, raw, known_min, known_min_x)

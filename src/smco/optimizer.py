@@ -294,6 +294,7 @@ def _single(
     use_runmax: bool,
     rng: np.random.Generator,
 ) -> SingleResult:
+    # 单起点 SMCO 主循环：维护当前点、运行最优(runmax)及累计平均状态。
     x_current = np.array(start_point, dtype=float, copy=True)
     f_current = float(f(x_current))
     f_runmax = f_current
@@ -305,8 +306,7 @@ def _single(
     s_value = x_current * n_boost_1
 
     if not buffer_rand:
-        # Upstream SMCO deliberately pushes these bounds outward; objective
-        # evaluations can occur outside the original search box before clipping.
+        # 与上游 R 一致：先把边界向外推，迭代中允许临时越界取样，最终再裁剪回原边界。
         fixed_pushout = float(bounds_buffer) * bounds_diff
         fixed_upper_out = bounds_upper + fixed_pushout
         fixed_lower_out = bounds_lower - fixed_pushout
@@ -329,6 +329,7 @@ def _single(
         )
 
         if buffer_rand:
+            # 随机缓冲：每轮对推边界加入随机扰动，提高探索多样性。
             pushout = float(bounds_buffer) * bounds_diff * rng.uniform(
                 -1.0,
                 1.0,
@@ -342,6 +343,7 @@ def _single(
 
         z_value = partial.signs * bounds_upper_out + (1.0 - partial.signs) * bounds_lower_out
         s_value = s_value + z_value
+        # 递推平均，与 R 版的 S/(n+1) 更新形式保持一致。
         x_next = s_value / (n + 1)
         f_next = float(f(x_next))
 
@@ -378,6 +380,7 @@ def _clip_result_to_bounds(
     bounds_lower: np.ndarray,
     bounds_upper: np.ndarray,
 ) -> None:
+    # 输出阶段统一做边界裁剪，避免返回值落在用户定义边界之外。
     checked = check_bounds(result.x_optimal, bounds_lower, bounds_upper)
     if checked.is_out:
         result.x_optimal = checked.x_in
@@ -391,6 +394,7 @@ def _clip_result_to_bounds(
 
 
 def _promote_runmax(result: SingleResult) -> None:
+    # 若 runmax 更优，则提升为最终最优解（与 use_runmax 语义一致）。
     if (
         result.x_runmax is not None
         and result.f_runmax is not None
@@ -418,6 +422,7 @@ def _single_refine(
     use_runmax: bool,
     rng: np.random.Generator,
 ) -> SingleResult:
+    # refine 模式分为两段：先常规搜索，再以第一段最优点做零缓冲精修。
     ratio = float(refine_ratio) if refine_search else 0.0
     iter_max_initial, iter_max_refine = _split_refine_iterations(iter_max, ratio, refine_search)
 
@@ -493,6 +498,7 @@ def _single_boost(
     use_runmax: bool,
     rng: np.random.Generator,
 ) -> SingleResult:
+    # boost 模式：比较 regular 与 boosted 两条路径，返回目标值更优者。
     regular = _single_refine(
         f,
         bounds_lower,
@@ -556,6 +562,7 @@ def smco_multi(
         control["seed"] = _as_integer("seed", control["seed"])
 
     if starts is None:
+        # 未指定起点时使用 Sobol 低差异序列自动生成多起点。
         starts = generate_sobol_points(control["n_starts"], lower, upper, control["seed"])
     else:
         control["n_starts"] = int(starts.shape[0])
@@ -589,6 +596,7 @@ def smco_multi(
 
     values = np.array([result.f_optimal for result in results], dtype=float)
     best_idx = int(np.argmax(values))
+    # summary 提供批次统计，便于 benchmark/论文实验后处理。
     endpoints = np.vstack([result.x_optimal for result in results])
     iterations = np.array([result.iterations for result in results], dtype=float)
     summary = {
