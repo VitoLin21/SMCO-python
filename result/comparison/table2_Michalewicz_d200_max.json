@@ -1,0 +1,72 @@
+[
+  {
+    "label": "table2_Michalewicz_d200_max",
+    "name": "Michalewicz",
+    "dim": 200,
+    "maximize": true,
+    "algo": "SMCO_R",
+    "time_avg": 72.40936509540771,
+    "rMSE": 13.228626820170454,
+    "AE50": 13.107904450147103,
+    "AE95": 14.114752707914453,
+    "AE99": 14.183547582189744,
+    "fopt_mean": 185.59212417932275,
+    "fopt_sd": 0.635663557977315
+  },
+  {
+    "label": "table2_Michalewicz_d200_max",
+    "name": "Michalewicz",
+    "dim": 200,
+    "maximize": true,
+    "algo": "GenSA",
+    "time_avg": 49.40635319860303,
+    "rMSE": 0.18298172550793929,
+    "AE50": 0.1866093402775988,
+    "AE95": 0.276798798196431,
+    "AE99": 0.2916002836604591,
+    "fopt_mean": 198.6586626371768,
+    "fopt_sd": 0.11293435259660742
+  },
+  {
+    "label": "table2_Michalewicz_d200_max",
+    "name": "Michalewicz",
+    "dim": 200,
+    "maximize": true,
+    "algo": "DEoptim",
+    "time_avg": 177.90996986610116,
+    "rMSE": 150.41401788489517,
+    "AE50": 150.52529861504675,
+    "AE95": 151.53418029734627,
+    "AE99": 151.6361607948698,
+    "fopt_mean": 48.39570032064475,
+    "fopt_sd": 0.9534285213055701
+  },
+  {
+    "label": "table2_Michalewicz_d200_max",
+    "name": "Michalewicz",
+    "dim": 200,
+    "maximize": true,
+    "algo": "GA",
+    "time_avg": 1.293810635106638,
+    "rMSE": 160.87294696839055,
+    "AE50": 161.007219928984,
+    "AE95": 163.23392182257376,
+    "AE99": 163.51860467784505,
+    "fopt_mean": 37.94249571346205,
+    "fopt_sd": 1.737422841828618
+  },
+  {
+    "label": "table2_Michalewicz_d200_max",
+    "name": "Michalewicz",
+    "dim": 200,
+    "maximize": true,
+    "algo": "PSO",
+    "time_avg": 0.6287260502052959,
+    "rMSE": 137.0338236491151,
+    "AE50": 137.51099593726414,
+    "AE95": 145.882025762914,
+    "AE99": 147.22505273225033,
+    "fopt_mean": 61.90708639413263,
+    "fopt_sd": 6.384256620132668
+  }
+]

@@ -4,7 +4,7 @@
 
 - 仓库：`https://github.com/VitoLin21/SMCO-python`
 - 当前分支：`main`
-- 当前基线提交：`7c65234`（`Initial Python SMCO migration`）
+- 当前基线提交：`0a35d65`（`docs+code: 中文化 README 并补充关键中文注释`）
 - 本地已对齐远端，`git status` 为 clean。
 
 本仓库是对 R 版本 `wayne-y-gao/SMCO` 的 Python 迁移，目标是：
