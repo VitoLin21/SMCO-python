@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from smco import run_benchmark
+from smco.optimizer import smco, smco_br, smco_r
 from smco.test_functions import assign_config
 
 from .domain_mod import modify_domain
@@ -58,8 +58,17 @@ def run_comparison(
 
     bounds_lower = config.bounds_lower.copy()
     bounds_upper = config.bounds_upper.copy()
-    f = config.f
 
+    # config.f 与 raw 的关系：sense="min" 时 config.f = -raw，sense="max" 时 config.f = raw
+    raw_f = (lambda x, _f=config.f: -_f(x)) if config.sense == "min" else config.f
+
+    # 构造 effective_f：始终是要最大化的函数
+    if to_maximize:
+        effective_f = raw_f
+    else:
+        effective_f = lambda x, _f=raw_f: -_f(x)
+
+    f = effective_f
     if domain_mod:
         f, bounds_lower, bounds_upper = modify_domain(
             f, bounds_lower, bounds_upper, dim_config,
@@ -76,36 +85,42 @@ def run_comparison(
 
         for algo_idx, algo_name in enumerate(algo_names):
             t0 = time.perf_counter()
+            algo_seed = int(rng.integers(0, 2**31))
 
             if algo_name in SMCO_VARIANTS:
-                # SMCO 变体：使用 run_benchmark
-                # run_benchmark 内部已处理最大化（config.f 已是最大化形式）
-                result = run_benchmark(
-                    name=name_config,
-                    dim=dim_config,
-                    variant=algo_name.lower(),
-                    repetitions=1,
-                    seed=int(rng.integers(0, 2**31)),
+                # SMCO 变体必须走各自公开包装器，不能统一退化成 smco_multi。
+                variant_map = {"SMCO": smco, "SMCO_R": smco_r, "SMCO_BR": smco_br}
+                variant_fn = variant_map[algo_name]
+                variant_options = {
+                    "iter_max": smco_options.get("iter_max", 300),
+                    "bounds_buffer": 0.05,
+                    "buffer_rand": True,
+                    "tol_conv": 1e-8,
+                    "seed": algo_seed,
+                }
+                if algo_name in ("SMCO_R", "SMCO_BR"):
+                    variant_options["refine_ratio"] = 0.5
+                if algo_name == "SMCO_BR":
+                    variant_options["iter_boost"] = 99
+                smco_result = variant_fn(
+                    f,
+                    bounds_lower,
+                    bounds_upper,
                     start_points=start_points,
-                    iter_max=smco_options.get("iter_max", 300),
-                    n_starts=n_starts,
+                    **variant_options,
                 )
-                fopt = result.best_value
+                fopt = smco_result.best_result.f_optimal
             elif algo_name in ("GenSA", "DEoptim", "GA", "PSO"):
-                # 全局方法：不需要 start_points
                 opt_fn = get_method(algo_name)
-                # config.f 已经是最大化形式；全局方法传入 maximize=True
                 result = opt_fn(
                     f, bounds_lower, bounds_upper,
                     maximize=True,
                     max_iter=smco_options.get("iter_max", 300),
-                    seed=int(rng.integers(0, 2**31)),
+                    seed=algo_seed,
                 )
                 fopt = result.f_optimal
             else:
-                # 局部对比方法：需要 start_points
                 opt_fn = get_method(algo_name)
-                # config.f 已经是最大化形式；传入 maximize=True
                 result = opt_fn(
                     f, bounds_lower, bounds_upper,
                     start_points=start_points,
@@ -115,13 +130,20 @@ def run_comparison(
                 fopt = result.f_optimal
 
             time_algo[algo_idx, i] = time.perf_counter() - t0
-            fopt_algo[algo_idx, i] = fopt
+            # fopt 是 effective_f(x*) 的最大值，转换回 raw 标尺
+            if to_maximize:
+                raw_value = fopt
+            else:
+                raw_value = -fopt
+            fopt_algo[algo_idx, i] = raw_value
 
-    # 计算 best_opt
+    # 计算 best_opt（在 raw 标尺上）
     if truth_known and true_opt is not None and np.isfinite(true_opt):
         best_opt = true_opt
-    else:
+    elif to_maximize:
         best_opt = float(np.nanmax(fopt_algo))
+    else:
+        best_opt = float(np.nanmin(fopt_algo))
 
     # 计算指标
     AE = np.abs(fopt_algo - best_opt)

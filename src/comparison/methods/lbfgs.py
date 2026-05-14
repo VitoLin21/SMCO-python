@@ -19,8 +19,9 @@ def lbfgs(
         raise ValueError("optimLBFGS requires start_points")
     target = (lambda x: -f(x)) if maximize else f
     bounds = list(zip(bounds_lower, bounds_upper))
+    is_better = (lambda cur, best: cur > best) if maximize else (lambda cur, best: cur < best)
     best_x = None
-    best_value = np.inf
+    best_value = -np.inf if maximize else np.inf
     total_iters = 0
     for sp in start_points:
         res = scipy_minimize(
@@ -29,7 +30,7 @@ def lbfgs(
         )
         total_iters += res.nit
         val = float(-res.fun if maximize else res.fun)
-        if val < best_value:
+        if is_better(val, best_value):
             best_value = val
             best_x = np.array(res.x, copy=True)
     if best_x is None:

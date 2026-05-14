@@ -30,23 +30,27 @@ def gradient_descent(
     if start_points is None:
         raise ValueError("GD requires start_points")
     sign = -1.0 if maximize else 1.0
+    is_better = (lambda cur, best: cur > best) if maximize else (lambda cur, best: cur < best)
     best_x = None
-    best_value = np.inf
+    best_value = -np.inf if maximize else np.inf
     total_iters = 0
     for sp in start_points:
         x = np.array(sp, dtype=float, copy=True)
         velocity = np.zeros_like(x)
         lr = learning_rate
         prev_value = float(f(x))
+        if is_better(prev_value, best_value):
+            best_value = prev_value
+            best_x = np.array(x, copy=True)
         for it in range(1, max_iter + 1):
             grad = _numerical_gradient(f, x)
             velocity = momentum * velocity + sign * lr * grad
             x_new = np.clip(x - velocity, bounds_lower, bounds_upper)
             current_value = float(f(x_new))
-            if current_value > prev_value:
+            if not is_better(current_value, prev_value) and it > 1:
                 lr *= 0.5
                 velocity *= 0.5
-            if current_value < best_value:
+            if is_better(current_value, best_value):
                 best_value = current_value
                 best_x = np.array(x_new, copy=True)
             if np.linalg.norm(x_new - x) < tol:

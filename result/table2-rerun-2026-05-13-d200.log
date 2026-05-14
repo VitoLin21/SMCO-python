@@ -1,0 +1,89 @@
+=== Table 2: d=200, Group II ===
+
+--- table2_Rastrigin_d200_max ---
+  SMCO             rMSE=1745.233475  AE99=1785.341387  time=28.5751s
+  SMCO_R           rMSE=1743.091897  AE99=1783.122609  time=28.5438s
+  SMCO_BR          rMSE=1743.084205  AE99=1783.099997  time=57.1171s
+  GenSA            rMSE=0.000000  AE99=0.000000  time=11.0701s
+  SA               rMSE=2354.907689  AE99=2491.127688  time=711.0038s
+  DEoptim          rMSE=3623.389432  AE99=3685.821714  time=150.3420s
+  GA               rMSE=3887.044398  AE99=3944.707637  time=0.8909s
+  PSO              rMSE=2173.807810  AE99=2194.286682  time=0.2663s
+  Saved: result/comparison-rerun-2026-05-13-d200/table2_Rastrigin_d200_max.json, result/comparison-rerun-2026-05-13-d200/table2_Rastrigin_d200_max.csv
+
+--- table2_Rastrigin_d200_min ---
+  SMCO             rMSE=319.204701  AE99=347.381096  time=28.3112s
+  SMCO_R           rMSE=319.257596  AE99=350.984016  time=28.3502s
+  SMCO_BR          rMSE=319.614825  AE99=353.891344  time=56.9733s
+  GenSA            rMSE=0.000000  AE99=0.000000  time=13.5419s
+  SA               rMSE=1731.934678  AE99=1937.212271  time=583.3519s
+  DEoptim          rMSE=2004.932776  AE99=2053.434362  time=149.7535s
+  GA               rMSE=2773.514617  AE99=2911.688364  time=0.8993s
+  PSO              rMSE=1873.469540  AE99=2019.834845  time=0.2808s
+  Saved: result/comparison-rerun-2026-05-13-d200/table2_Rastrigin_d200_min.json, result/comparison-rerun-2026-05-13-d200/table2_Rastrigin_d200_min.csv
+
+--- table2_Ackley_d200_max ---
+  SMCO             rMSE=0.895210  AE99=0.936290  time=45.1433s
+  SMCO_R           rMSE=0.342144  AE99=0.387477  time=44.5970s
+  SMCO_BR          rMSE=0.310185  AE99=0.330692  time=89.3369s
+  GenSA            rMSE=0.002109  AE99=0.004138  time=12.0794s
+  SA               rMSE=0.267719  AE99=0.308671  time=110.5345s
+  DEoptim          rMSE=0.706852  AE99=0.737546  time=166.5430s
+  GA               rMSE=0.755569  AE99=0.796067  time=1.0198s
+  PSO              rMSE=0.256299  AE99=0.302878  time=0.3912s
+  Saved: result/comparison-rerun-2026-05-13-d200/table2_Ackley_d200_max.json, result/comparison-rerun-2026-05-13-d200/table2_Ackley_d200_max.csv
+
+--- table2_Ackley_d200_min ---
+  SMCO             rMSE=0.198620  AE99=0.204402  time=44.4730s
+  SMCO_R           rMSE=0.064495  AE99=0.066286  time=42.2028s
+  SMCO_BR          rMSE=0.064818  AE99=0.066501  time=89.9724s
+  GenSA            rMSE=0.000003  AE99=0.000010  time=18.4474s
+  SA               rMSE=19.517485  AE99=19.634663  time=44.0478s
+  DEoptim          rMSE=3.632994  AE99=3.980292  time=159.5895s
+  GA               rMSE=20.485620  AE99=20.691732  time=1.0684s
+  PSO              rMSE=19.931263  AE99=20.033659  time=0.4403s
+  Saved: result/comparison-rerun-2026-05-13-d200/table2_Ackley_d200_min.json, result/comparison-rerun-2026-05-13-d200/table2_Ackley_d200_min.csv
+
+--- table2_Griewank_d200_max ---
+  SMCO             rMSE=454.182720  AE99=470.295193  time=35.8395s
+  SMCO_R           rMSE=704.824006  AE99=733.346545  time=35.6095s
+  SMCO_BR          rMSE=705.484903  AE99=721.802201  time=72.4462s
+  GenSA            rMSE=0.000000  AE99=0.000000  time=13.5769s
+  SA               rMSE=8228.175894  AE99=10490.101290  time=147.6047s
+  DEoptim          rMSE=9938.267603  AE99=10148.025919  time=163.8942s
+  GA               rMSE=10543.556861  AE99=10835.052599  time=0.9541s
+  PSO              rMSE=0.000000  AE99=0.000000  time=0.3173s
+  Saved: result/comparison-rerun-2026-05-13-d200/table2_Griewank_d200_max.json, result/comparison-rerun-2026-05-13-d200/table2_Griewank_d200_max.csv
+
+--- table2_Griewank_d200_min ---
+  SMCO             rMSE=0.589567  AE99=0.649261  time=33.8635s
+  SMCO_R           rMSE=0.146273  AE99=0.158105  time=33.7902s
+  SMCO_BR          rMSE=0.118642  AE99=0.130305  time=66.5455s
+  GenSA            rMSE=0.003899  AE99=0.009642  time=10.8707s
+  SA               rMSE=0.000000  AE99=0.000000  time=247.7337s
+  DEoptim          rMSE=3.939898  AE99=5.632290  time=153.8099s
+  GA               rMSE=3121.368316  AE99=3619.612474  time=0.9677s
+  PSO              rMSE=1433.341498  AE99=1813.242267  time=0.3720s
+  Saved: result/comparison-rerun-2026-05-13-d200/table2_Griewank_d200_min.json, result/comparison-rerun-2026-05-13-d200/table2_Griewank_d200_min.csv
+
+--- table2_Michalewicz_d200_max ---
+  SMCO             rMSE=0.000000  AE99=0.000001  time=69.1234s
+  SMCO_R           rMSE=0.000000  AE99=0.000000  time=51.9006s
+  SMCO_BR          rMSE=0.000000  AE99=0.000000  time=105.3708s
+  GenSA            rMSE=0.000001  AE99=0.000003  time=14.6195s
+  SA               rMSE=0.000000  AE99=0.000000  time=3059.0165s
+  DEoptim          rMSE=8.086721  AE99=8.623832  time=173.7626s
+  GA               rMSE=11.165969  AE99=12.485009  time=1.2850s
+  PSO              rMSE=0.002430  AE99=0.007018  time=0.5172s
+  Saved: result/comparison-rerun-2026-05-13-d200/table2_Michalewicz_d200_max.json, result/comparison-rerun-2026-05-13-d200/table2_Michalewicz_d200_max.csv
+
+--- table2_Michalewicz_d200_min ---
+  SMCO             rMSE=46.032070  AE99=49.228669  time=72.1095s
+  SMCO_R           rMSE=13.685588  AE99=14.805088  time=72.0550s
+  SMCO_BR          rMSE=13.680421  AE99=15.151883  time=143.1210s
+  GenSA            rMSE=0.232962  AE99=0.380734  time=52.7224s
+  SA               rMSE=100.123933  AE99=106.100520  time=3025.6992s
+  DEoptim          rMSE=150.728600  AE99=152.231215  time=173.1559s
+  GA               rMSE=160.852142  AE99=163.140613  time=1.2925s
+  PSO              rMSE=133.631342  AE99=150.270060  time=0.6228s
+  Saved: result/comparison-rerun-2026-05-13-d200/table2_Michalewicz_d200_min.json, result/comparison-rerun-2026-05-13-d200/table2_Michalewicz_d200_min.csv

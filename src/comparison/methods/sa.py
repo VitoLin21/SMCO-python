@@ -32,5 +32,5 @@ def simulated_annealing(
 
     res = basinhopping(target, x0, niter=max_iter, accept_test=BoundsCheck(), seed=seed)
     x_clipped = np.clip(res.x, bounds_lower, bounds_upper)
-    val = float(-target(x_clipped))
+    val = float(f(x_clipped))
     return OptimizerResult(x_optimal=np.array(x_clipped, copy=True), f_optimal=val, iterations=res.nit)

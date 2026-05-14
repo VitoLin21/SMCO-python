@@ -24,8 +24,9 @@ def adam(
     if start_points is None:
         raise ValueError("ADAM requires start_points")
     sign = -1.0 if maximize else 1.0
+    is_better = (lambda cur, best: cur > best) if maximize else (lambda cur, best: cur < best)
     best_x = None
-    best_value = np.inf
+    best_value = -np.inf if maximize else np.inf
     total_iters = 0
     for sp in start_points:
         x = np.array(sp, dtype=float, copy=True)
@@ -39,7 +40,7 @@ def adam(
             v_hat = v / (1.0 - beta2**t)
             x_new = np.clip(x - sign * learning_rate * m_hat / (np.sqrt(v_hat) + epsilon), bounds_lower, bounds_upper)
             current_value = float(f(x_new))
-            if current_value < best_value:
+            if is_better(current_value, best_value):
                 best_value = current_value
                 best_x = np.array(x_new, copy=True)
             if np.linalg.norm(x_new - x) < tol:

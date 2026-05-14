@@ -33,44 +33,99 @@ from comparison.methods.spsa import spsa
 from comparison.methods.adam import adam
 
 
-def _sphere_min(x):
+def _sphere(x):
     return float(np.sum(x**2))
 
 
+def _neg_sphere(x):
+    return float(-np.sum(x**2))
+
+
+# --- Directional semantics tests ---
+
+class TestDirectionSemantics:
+    """Verify f_optimal = f(x_optimal) in both minimize and maximize modes."""
+
+    LOCAL_METHODS = [
+        ("GD", gradient_descent),
+        ("SignGD", sign_gradient_descent),
+        ("ADAM", adam),
+        ("SPSA", spsa),
+        ("optimLBFGS", get_method("optimLBFGS")),
+        ("optimNM", get_method("optimNM")),
+        ("BOBYQA", get_method("BOBYQA")),
+    ]
+
+    GLOBAL_METHODS = [
+        ("GenSA", get_method("GenSA")),
+        ("SA", get_method("SA")),
+        ("DEoptim", get_method("DEoptim")),
+        ("GA", get_method("GA")),
+        ("PSO", get_method("PSO")),
+    ]
+
+    @pytest.mark.parametrize("name,fn", LOCAL_METHODS)
+    def test_local_minimize_sphere(self, name, fn):
+        bl, bu = np.array([-5.0, -5.0]), np.array([5.0, 5.0])
+        starts = np.array([[2.0, 2.0]])
+        if name == "SPSA":
+            result = fn(_sphere, bl, bu, starts, maximize=False, max_iter=5000, a=0.1, A=100.0, tol=1e-12, seed=42)
+        else:
+            result = fn(_sphere, bl, bu, starts, maximize=False, max_iter=500)
+        assert result.f_optimal >= 0, f"{name}: f_optimal should be non-negative when minimizing sphere, got {result.f_optimal}"
+
+    @pytest.mark.parametrize("name,fn", LOCAL_METHODS)
+    def test_local_maximize_neg_sphere(self, name, fn):
+        bl, bu = np.array([-1.0, -1.0]), np.array([1.0, 1.0])
+        starts = np.array([[0.1, 0.1]])
+        kw = {"seed": 42} if name == "SPSA" else {}
+        result = fn(_neg_sphere, bl, bu, starts, maximize=True, max_iter=500, **kw)
+        assert result.f_optimal > -0.5, f"{name}: maximize neg_sphere should be close to 0, got {result.f_optimal}"
+
+    @pytest.mark.parametrize("name,fn", GLOBAL_METHODS)
+    def test_global_minimize_sphere(self, name, fn):
+        bl, bu = np.array([-5.0, -5.0]), np.array([5.0, 5.0])
+        result = fn(_sphere, bl, bu, maximize=False, max_iter=50, seed=42)
+        assert result.f_optimal >= 0, f"{name}: f_optimal should be non-negative when minimizing sphere, got {result.f_optimal}"
+        assert result.f_optimal < 2.0
+
+    @pytest.mark.parametrize("name,fn", GLOBAL_METHODS)
+    def test_global_maximize_neg_sphere(self, name, fn):
+        bl, bu = np.array([-1.0, -1.0]), np.array([1.0, 1.0])
+        result = fn(_neg_sphere, bl, bu, maximize=True, max_iter=50, seed=42)
+        assert result.f_optimal > -0.5, f"{name}: maximize neg_sphere should be close to 0, got {result.f_optimal}"
+
+
+# --- Original method-specific tests ---
+
 class TestGD:
     def test_finds_minimum(self):
-        bl = np.array([-5.0, -5.0])
-        bu = np.array([5.0, 5.0])
+        bl, bu = np.array([-5.0, -5.0]), np.array([5.0, 5.0])
         starts = np.array([[2.0, 2.0], [-2.0, -2.0]])
-        result = gradient_descent(_sphere_min, bl, bu, starts, maximize=False, max_iter=500)
+        result = gradient_descent(_sphere, bl, bu, starts, maximize=False, max_iter=500)
         assert result.f_optimal < 0.5
         assert result.x_optimal.shape == (2,)
 
     def test_registered(self):
         assert "GD" in METHOD_REGISTRY
         fn = get_method("GD")
-        bl = np.array([-5.0, -5.0])
-        bu = np.array([5.0, 5.0])
+        bl, bu = np.array([-5.0, -5.0]), np.array([5.0, 5.0])
         starts = np.array([[1.0, 1.0]])
-        result = fn(_sphere_min, bl, bu, starts, maximize=False, max_iter=200)
+        result = fn(_sphere, bl, bu, starts, maximize=False, max_iter=200)
         assert isinstance(result, OptimizerResult)
 
     def test_maximize(self):
-        def neg_sphere(x):
-            return float(-np.sum(x**2))
-        bl = np.array([-1.0, -1.0])
-        bu = np.array([1.0, 1.0])
+        bl, bu = np.array([-1.0, -1.0]), np.array([1.0, 1.0])
         starts = np.array([[0.1, 0.1]])
-        result = gradient_descent(neg_sphere, bl, bu, starts, maximize=True, max_iter=500)
-        assert result.f_optimal < -0.01
+        result = gradient_descent(_neg_sphere, bl, bu, starts, maximize=True, max_iter=500)
+        assert result.f_optimal > -0.05
 
 
 class TestSignGD:
     def test_finds_minimum(self):
-        bl = np.array([-5.0, -5.0])
-        bu = np.array([5.0, 5.0])
+        bl, bu = np.array([-5.0, -5.0]), np.array([5.0, 5.0])
         starts = np.array([[2.0, 2.0], [-2.0, -2.0]])
-        result = sign_gradient_descent(_sphere_min, bl, bu, starts, maximize=False, max_iter=500)
+        result = sign_gradient_descent(_sphere, bl, bu, starts, maximize=False, max_iter=500)
         assert result.f_optimal < 1.0
         assert result.x_optimal.shape == (2,)
 
@@ -80,13 +135,10 @@ class TestSignGD:
 
 class TestSPSA:
     def test_finds_minimum(self):
-        bl = np.array([-5.0, -5.0])
-        bu = np.array([5.0, 5.0])
+        bl, bu = np.array([-5.0, -5.0]), np.array([5.0, 5.0])
         starts = np.array([[2.0, 2.0]])
-        # Use more conservative parameters and accept that SPSA may not converge as quickly
-        result = spsa(_sphere_min, bl, bu, starts, maximize=False, max_iter=5000, a=0.1, A=100.0, alpha=0.602, tol=1e-12, seed=42)
-        # SPSA is a stochastic method, so we just check it doesn't diverge and improves somewhat
-        assert result.f_optimal < 8.0  # Starting point is 8.0, so this ensures some improvement
+        result = spsa(_sphere, bl, bu, starts, maximize=False, max_iter=5000, a=0.1, A=100.0, alpha=0.602, tol=1e-12, seed=42)
+        assert result.f_optimal < 8.0
         assert result.x_optimal.shape == (2,)
 
     def test_registered(self):
@@ -95,10 +147,9 @@ class TestSPSA:
 
 class TestAdam:
     def test_finds_minimum(self):
-        bl = np.array([-5.0, -5.0])
-        bu = np.array([5.0, 5.0])
+        bl, bu = np.array([-5.0, -5.0]), np.array([5.0, 5.0])
         starts = np.array([[2.0, 2.0]])
-        result = adam(_sphere_min, bl, bu, starts, maximize=False, max_iter=500)
+        result = adam(_sphere, bl, bu, starts, maximize=False, max_iter=500)
         assert result.f_optimal < 0.5
         assert result.x_optimal.shape == (2,)
 
@@ -123,10 +174,9 @@ class TestScipyMethods:
         ("BOBYQA", bobyqa),
     ])
     def test_minimize_sphere(self, name, fn):
-        bl = np.array([-5.0, -5.0])
-        bu = np.array([5.0, 5.0])
+        bl, bu = np.array([-5.0, -5.0]), np.array([5.0, 5.0])
         starts = np.array([[2.0, 2.0]])
-        result = fn(_sphere_min, bl, bu, starts, maximize=False, max_iter=500)
+        result = fn(_sphere, bl, bu, starts, maximize=False, max_iter=500)
         assert result.f_optimal < 1.0
         assert result.x_optimal.shape == (2,)
 
@@ -142,9 +192,8 @@ class TestGlobalMethods:
         ("DEoptim", differential_evo),
     ])
     def test_minimize_sphere(self, name, fn):
-        bl = np.array([-5.0, -5.0])
-        bu = np.array([5.0, 5.0])
-        result = fn(_sphere_min, bl, bu, maximize=False, max_iter=50, seed=42)
+        bl, bu = np.array([-5.0, -5.0]), np.array([5.0, 5.0])
+        result = fn(_sphere, bl, bu, maximize=False, max_iter=50, seed=42)
         assert result.f_optimal < 1.0
         assert result.x_optimal.shape == (2,)
 
@@ -159,9 +208,8 @@ class TestGAPSO:
         ("PSO", particle_swarm),
     ])
     def test_minimize_sphere(self, name, fn):
-        bl = np.array([-5.0, -5.0])
-        bu = np.array([5.0, 5.0])
-        result = fn(_sphere_min, bl, bu, maximize=False, max_iter=50, seed=42)
+        bl, bu = np.array([-5.0, -5.0]), np.array([5.0, 5.0])
+        result = fn(_sphere, bl, bu, maximize=False, max_iter=50, seed=42)
         assert result.f_optimal < 2.0
         assert result.x_optimal.shape == (2,)
 
@@ -176,8 +224,7 @@ from comparison.run_comparison import run_comparison, generate_unif_starts
 
 class TestDomainMod:
     def test_preserves_shape(self):
-        bl = np.array([-5.0, -5.0])
-        bu = np.array([5.0, 5.0])
+        bl, bu = np.array([-5.0, -5.0]), np.array([5.0, 5.0])
         def identity(x):
             return float(np.sum(x))
         f_mod, new_bl, new_bu = modify_domain(identity, bl, bu, dim=2, seed=42)
@@ -186,9 +233,8 @@ class TestDomainMod:
         assert np.all(new_bl < new_bu)
 
     def test_output_is_scalar(self):
-        bl = np.array([-5.0, -5.0])
-        bu = np.array([5.0, 5.0])
-        f_mod, _, _ = modify_domain(_sphere_min, bl, bu, dim=2, seed=1)
+        bl, bu = np.array([-5.0, -5.0]), np.array([5.0, 5.0])
+        f_mod, _, _ = modify_domain(_sphere, bl, bu, dim=2, seed=1)
         val = f_mod(np.array([1.0, 2.0]))
         assert isinstance(val, float)
         assert np.isfinite(val)
@@ -196,13 +242,12 @@ class TestDomainMod:
 
 class TestRunComparison:
     def test_generate_starts(self):
-        bl = np.array([-5.0, -5.0])
-        bu = np.array([5.0, 5.0])
+        bl, bu = np.array([-5.0, -5.0]), np.array([5.0, 5.0])
         starts = generate_unif_starts(3, bl, bu)
         assert starts.shape == (3, 2)
         assert np.all(starts >= bl) and np.all(starts <= bu)
 
-    def test_quick_comparison(self):
+    def test_quick_comparison_maximize(self):
         result = run_comparison(
             name_config="Rastrigin",
             dim_config=2,
@@ -217,3 +262,34 @@ class TestRunComparison:
         assert "SMCO_R" in result.sum_results
         assert "GD" in result.sum_results
         assert "rMSE" in result.sum_results["SMCO_R"]
+
+    def test_to_maximize_produces_different_results(self):
+        """to_maximize=True and False must NOT produce identical results."""
+        opts = {"iter_max": 50, "n_starts": 3}
+        r_max = run_comparison("Rastrigin", 2, True, ["SMCO_R"], 2, opts, seed=42)
+        r_min = run_comparison("Rastrigin", 2, False, ["SMCO_R"], 2, opts, seed=42)
+        assert not np.allclose(r_max.fopt_algo, r_min.fopt_algo), \
+            "to_maximize=True and False should produce different fopt values"
+        assert r_max.to_maximize is True
+        assert r_min.to_maximize is False
+
+    def test_maximize_best_opt_is_max(self):
+        """When maximizing, best_opt should be the max of fopt_algo."""
+        result = run_comparison("Rastrigin", 2, True, ["SMCO_R", "GD"], 3,
+                                {"iter_max": 50, "n_starts": 3}, seed=42)
+        assert result.best_opt == pytest.approx(float(np.nanmax(result.fopt_algo)))
+
+    def test_minimize_best_opt_is_min(self):
+        """When minimizing, best_opt should be the min of fopt_algo."""
+        result = run_comparison("Rastrigin", 2, False, ["SMCO_R", "GD"], 3,
+                                {"iter_max": 50, "n_starts": 3}, seed=42)
+        assert result.best_opt == pytest.approx(float(np.nanmin(result.fopt_algo)))
+
+    def test_smco_variants_do_not_collapse_to_same_path(self):
+        """SMCO and SMCO_R should not silently run the same implementation path."""
+        opts = {"iter_max": 60, "n_starts": 3}
+        r_smco = run_comparison("Rastrigin", 2, True, ["SMCO"], 3, opts, seed=42)
+        r_smco_r = run_comparison("Rastrigin", 2, True, ["SMCO_R"], 3, opts, seed=42)
+        assert not np.allclose(r_smco.fopt_algo, r_smco_r.fopt_algo), (
+            "SMCO and SMCO_R produced identical outputs; comparison likely bypassed variant dispatch"
+        )

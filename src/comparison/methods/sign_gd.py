@@ -22,8 +22,9 @@ def sign_gradient_descent(
     if start_points is None:
         raise ValueError("SignGD requires start_points")
     sign = -1.0 if maximize else 1.0
+    is_better = (lambda cur, best: cur > best) if maximize else (lambda cur, best: cur < best)
     best_x = None
-    best_value = np.inf
+    best_value = -np.inf if maximize else np.inf
     total_iters = 0
     for sp in start_points:
         x = np.array(sp, dtype=float, copy=True)
@@ -34,7 +35,7 @@ def sign_gradient_descent(
             grad_sign = np.sign(grad)
             x_new = np.clip(x - sign * lr * grad_sign, bounds_lower, bounds_upper)
             new_value = float(f(x_new))
-            if new_value < best_value:
+            if is_better(new_value, best_value):
                 best_value = new_value
                 best_x = np.array(x_new, copy=True)
                 no_improve = 0

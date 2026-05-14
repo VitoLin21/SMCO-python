@@ -18,8 +18,9 @@ def nelder_mead(
     if start_points is None:
         raise ValueError("optimNM requires start_points")
     target = (lambda x: -f(x)) if maximize else f
+    is_better = (lambda cur, best: cur > best) if maximize else (lambda cur, best: cur < best)
     best_x = None
-    best_value = np.inf
+    best_value = -np.inf if maximize else np.inf
     total_iters = 0
     for sp in start_points:
         res = scipy_minimize(
@@ -28,8 +29,8 @@ def nelder_mead(
         )
         total_iters += res.nit
         x_clipped = np.clip(res.x, bounds_lower, bounds_upper)
-        val = float(-target(x_clipped))
-        if val < best_value:
+        val = float(f(x_clipped))
+        if is_better(val, best_value):
             best_value = val
             best_x = np.array(x_clipped, copy=True)
     if best_x is None:

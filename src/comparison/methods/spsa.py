@@ -26,13 +26,17 @@ def spsa(
         raise ValueError("SPSA requires start_points")
     rng = np.random.default_rng(seed)
     sign = -1.0 if maximize else 1.0
+    is_better = (lambda cur, best: cur > best) if maximize else (lambda cur, best: cur < best)
     best_x = None
-    best_value = np.inf
+    best_value = -np.inf if maximize else np.inf
     total_iters = 0
     for sp in start_points:
         x = np.array(sp, dtype=float, copy=True)
         d = x.size
         prev_value = float(f(x))
+        if is_better(prev_value, best_value):
+            best_value = prev_value
+            best_x = np.array(x, copy=True)
         for k in range(1, max_iter + 1):
             ak = a / (A + k) ** alpha
             ck = c / k ** gamma
@@ -46,7 +50,7 @@ def spsa(
             g_hat = np.nan_to_num(g_hat, nan=0.0, posinf=0.0, neginf=0.0)
             x = np.clip(x - sign * ak * g_hat, bounds_lower, bounds_upper)
             current_value = float(f(x))
-            if current_value < best_value:
+            if is_better(current_value, best_value):
                 best_value = current_value
                 best_x = np.array(x, copy=True)
             if k > 1 and abs(current_value - prev_value) < tol:
