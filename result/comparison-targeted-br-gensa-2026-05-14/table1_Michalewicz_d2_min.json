@@ -1,0 +1,34 @@
+[
+  {
+    "label": "table1_Michalewicz_d2_min",
+    "name": "Michalewicz",
+    "dim": 2,
+    "maximize": false,
+    "n_replications": 500,
+    "best_opt": -1.8013034100985532,
+    "algo": "SMCO_BR",
+    "time_avg": 0.03362970068049617,
+    "rMSE": 7.028401309147499e-06,
+    "AE50": 2.9005462560682815e-06,
+    "AE95": 1.6253035623270408e-05,
+    "AE99": 1.9232687408934355e-05,
+    "fopt_mean": -1.8012986424323527,
+    "fopt_sd": 5.169257820376855e-06
+  },
+  {
+    "label": "table1_Michalewicz_d2_min",
+    "name": "Michalewicz",
+    "dim": 2,
+    "maximize": false,
+    "n_replications": 500,
+    "best_opt": -1.8013034100985532,
+    "algo": "GenSA",
+    "time_avg": 0.08018596370029263,
+    "rMSE": 7.294929354399235e-11,
+    "AE50": 2.4868995751603507e-14,
+    "AE95": 3.884492727479449e-12,
+    "AE99": 3.539589954471011e-11,
+    "fopt_mean": -1.801303410094096,
+    "fopt_sd": 7.288589414476783e-11
+  }
+]

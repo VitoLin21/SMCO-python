@@ -163,7 +163,7 @@ from comparison.methods.bobyqa import bobyqa
 from comparison.methods.gensa import gensa
 from comparison.methods.sa import simulated_annealing
 from comparison.methods.de import differential_evo
-from comparison.methods.ga import genetic_algorithm
+from comparison.methods.ga import genetic_algorithm, _select_tournament_parents
 from comparison.methods.pso import particle_swarm
 
 
@@ -217,9 +217,15 @@ class TestGAPSO:
         for name in ("GA", "PSO"):
             assert name in METHOD_REGISTRY
 
+    def test_ga_tournament_selection_uses_population_indices(self):
+        fitness = np.array([100.0, 90.0, 80.0, 70.0, 60.0, 50.0, 40.0, 30.0, 20.0, 10.0])
+        parents_idx = _select_tournament_parents(fitness, np.random.default_rng(42), fitness.size)
+        assert np.all((parents_idx >= 0) & (parents_idx < fitness.size))
+        assert parents_idx.max() > 2
+
 
 from comparison.domain_mod import modify_domain
-from comparison.run_comparison import run_comparison, generate_unif_starts
+from comparison.run_comparison import run_comparison, generate_unif_starts, _smco_variant_options
 
 
 class TestDomainMod:
@@ -293,3 +299,36 @@ class TestRunComparison:
         assert not np.allclose(r_smco.fopt_algo, r_smco_r.fopt_algo), (
             "SMCO and SMCO_R produced identical outputs; comparison likely bypassed variant dispatch"
         )
+
+    def test_spsa_comparison_is_reproducible_with_fixed_seed(self):
+        opts = {"iter_max": 20, "n_starts": 2}
+        first = run_comparison("Rastrigin", 2, True, ["SPSA"], 3, opts, seed=123)
+        second = run_comparison("Rastrigin", 2, True, ["SPSA"], 3, opts, seed=123)
+        assert np.allclose(first.fopt_algo, second.fopt_algo)
+
+    def test_smco_variant_options_merge_user_controls(self):
+        options = _smco_variant_options(
+            "SMCO_BR",
+            {
+                "iter_max": 101,
+                "n_starts": 7,
+                "bounds_buffer": 0.2,
+                "buffer_rand": False,
+                "tol_conv": 1e-6,
+                "refine_ratio": 0.25,
+                "iter_boost": 11,
+                "partial_option": "forward",
+                "use_runmax": False,
+            },
+            algo_seed=99,
+        )
+        assert options["iter_max"] == 51
+        assert options["iter_boost"] == 11
+        assert options["bounds_buffer"] == 0.2
+        assert options["buffer_rand"] is False
+        assert options["tol_conv"] == 1e-6
+        assert options["refine_ratio"] == 0.25
+        assert options["partial_option"] == "forward"
+        assert options["use_runmax"] is False
+        assert options["seed"] == 99
+        assert "n_starts" not in options

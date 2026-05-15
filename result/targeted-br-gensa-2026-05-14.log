@@ -1,0 +1,58 @@
+=== Targeted Table 1: SMCO_BR + GenSA, d=2 ===
+[run] table1_Rastrigin_d2_max: dim=2, maximize=True, algos=SMCO_BR,GenSA, reps=500
+  SMCO_BR  rMSE=2.61922 AE99=8.04093 time=0.0286s
+  GenSA    rMSE=4.12215e-10 AE99=1.92341e-09 time=0.0762s
+[done] table1_Rastrigin_d2_max: elapsed=52.4s
+[run] table1_Rastrigin_d2_min: dim=2, maximize=False, algos=SMCO_BR,GenSA, reps=500
+  SMCO_BR  rMSE=0.10904 AE99=0.994976 time=0.0268s
+  GenSA    rMSE=5.5748e-14 AE99=1.78275e-13 time=0.0751s
+[done] table1_Rastrigin_d2_min: elapsed=51.0s
+[run] table1_Ackley_d2_max: dim=2, maximize=True, algos=SMCO_BR,GenSA, reps=500
+  SMCO_BR  rMSE=0.113698 AE99=0.239953 time=0.0434s
+  GenSA    rMSE=0.00139989 AE99=0.00654033 time=0.0905s
+[done] table1_Ackley_d2_max: elapsed=67.0s
+[run] table1_Ackley_d2_min: dim=2, maximize=False, algos=SMCO_BR,GenSA, reps=500
+  SMCO_BR  rMSE=0.0490569 AE99=0.0941849 time=0.0432s
+  GenSA    rMSE=1.57839e-08 AE99=3.95516e-08 time=0.1040s
+[done] table1_Ackley_d2_min: elapsed=73.6s
+[run] table1_Griewank_d2_max: dim=2, maximize=True, algos=SMCO_BR,GenSA, reps=500
+  SMCO_BR  rMSE=0.273546 AE99=0.525962 time=0.0326s
+  GenSA    rMSE=0.179211 AE99=0.408991 time=0.0862s
+[done] table1_Griewank_d2_max: elapsed=59.4s
+[run] table1_Griewank_d2_min: dim=2, maximize=False, algos=SMCO_BR,GenSA, reps=500
+  SMCO_BR  rMSE=0.0308059 AE99=0.0691996 time=0.0326s
+  GenSA    rMSE=0.012075 AE99=0.046835 time=0.0858s
+[done] table1_Griewank_d2_min: elapsed=59.2s
+[run] table1_Michalewicz_d2_max: dim=2, maximize=True, algos=SMCO_BR,GenSA, reps=500
+  SMCO_BR  rMSE=7.52381e-32 AE99=2.91748e-42 time=0.0186s
+  GenSA    rMSE=1.84411e-40 AE99=4.65389e-44 time=0.0788s
+[done] table1_Michalewicz_d2_max: elapsed=48.7s
+[run] table1_Michalewicz_d2_min: dim=2, maximize=False, algos=SMCO_BR,GenSA, reps=500
+  SMCO_BR  rMSE=7.0284e-06 AE99=1.92327e-05 time=0.0336s
+  GenSA    rMSE=7.29493e-11 AE99=3.53959e-11 time=0.0802s
+[done] table1_Michalewicz_d2_min: elapsed=56.9s
+=== Targeted Table 2: SMCO_BR, d=200 ===
+[run] table2_Rastrigin_d200_max: dim=200, maximize=True, algos=SMCO_BR, reps=10
+  SMCO_BR  rMSE=220.272 AE99=282.794 time=30.3962s
+[done] table2_Rastrigin_d200_max: elapsed=304.0s
+[run] table2_Rastrigin_d200_min: dim=200, maximize=False, algos=SMCO_BR, reps=10
+  SMCO_BR  rMSE=61.0965 AE99=97.668 time=30.1319s
+[done] table2_Rastrigin_d200_min: elapsed=301.3s
+[run] table2_Ackley_d200_max: dim=200, maximize=True, algos=SMCO_BR, reps=10
+  SMCO_BR  rMSE=0.0621191 AE99=0.0902655 time=48.8941s
+[done] table2_Ackley_d200_max: elapsed=488.9s
+[run] table2_Ackley_d200_min: dim=200, maximize=False, algos=SMCO_BR, reps=10
+  SMCO_BR  rMSE=0.00323318 AE99=0.00486253 time=47.7503s
+[done] table2_Ackley_d200_min: elapsed=477.5s
+[run] table2_Griewank_d200_max: dim=200, maximize=True, algos=SMCO_BR, reps=10
+  SMCO_BR  rMSE=115.225 AE99=157.821 time=36.9654s
+[done] table2_Griewank_d200_max: elapsed=369.7s
+[run] table2_Griewank_d200_min: dim=200, maximize=False, algos=SMCO_BR, reps=10
+  SMCO_BR  rMSE=0.0171919 AE99=0.0304997 time=34.4982s
+[done] table2_Griewank_d200_min: elapsed=345.0s
+[run] table2_Michalewicz_d200_max: dim=200, maximize=True, algos=SMCO_BR, reps=10
+  SMCO_BR  rMSE=4.83753e-13 AE99=6.96127e-13 time=61.0149s
+[done] table2_Michalewicz_d200_max: elapsed=610.2s
+[run] table2_Michalewicz_d200_min: dim=200, maximize=False, algos=SMCO_BR, reps=10
+  SMCO_BR  rMSE=1.5854 AE99=2.76936 time=76.7957s
+[done] table2_Michalewicz_d200_min: elapsed=768.0s

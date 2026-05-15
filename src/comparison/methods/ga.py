@@ -4,6 +4,20 @@ from . import register
 from .base import OptimizerResult
 
 
+def _select_tournament_parents(
+    fitness: np.ndarray,
+    rng: np.random.Generator,
+    pop_size: int,
+    tournament_size: int = 3,
+) -> np.ndarray:
+    parents_idx = np.empty(pop_size, dtype=int)
+    sample_size = min(tournament_size, pop_size)
+    for i in range(pop_size):
+        candidates = rng.choice(pop_size, size=sample_size, replace=False)
+        parents_idx[i] = int(candidates[np.argmin(fitness[candidates])])
+    return parents_idx
+
+
 @register("GA")
 def genetic_algorithm(
     f,
@@ -29,10 +43,7 @@ def genetic_algorithm(
     best_x = np.array(pop[best_idx], copy=True)
     best_value = float(fitness[best_idx])
     for _ in range(max_iter):
-        parents_idx = np.array([
-            int(np.argmin(rng.choice(fitness, size=min(3, pop_size), replace=False)))
-            for _ in range(pop_size)
-        ])
+        parents_idx = _select_tournament_parents(fitness, rng, pop_size)
         offspring = np.empty_like(pop)
         for i in range(0, pop_size - 1, 2):
             p1, p2 = pop[parents_idx[i]], pop[parents_idx[i + 1]]

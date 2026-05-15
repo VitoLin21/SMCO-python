@@ -18,6 +18,7 @@ def nelder_mead(
     if start_points is None:
         raise ValueError("optimNM requires start_points")
     target = (lambda x: -f(x)) if maximize else f
+    bounds = list(zip(bounds_lower, bounds_upper))
     is_better = (lambda cur, best: cur > best) if maximize else (lambda cur, best: cur < best)
     best_x = None
     best_value = -np.inf if maximize else np.inf
@@ -25,6 +26,7 @@ def nelder_mead(
     for sp in start_points:
         res = scipy_minimize(
             target, np.array(sp, dtype=float), method="Nelder-Mead",
+            bounds=bounds,
             options={"maxiter": max_iter, "xatol": tol, "fatol": tol},
         )
         total_iters += res.nit

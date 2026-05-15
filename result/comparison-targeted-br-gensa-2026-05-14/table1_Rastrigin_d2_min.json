@@ -1,0 +1,34 @@
+[
+  {
+    "label": "table1_Rastrigin_d2_min",
+    "name": "Rastrigin",
+    "dim": 2,
+    "maximize": false,
+    "n_replications": 500,
+    "best_opt": 0.0,
+    "algo": "SMCO_BR",
+    "time_avg": 0.026828422669088466,
+    "rMSE": 0.109040120304733,
+    "AE50": 0.001190314941959869,
+    "AE95": 0.002901519865601719,
+    "AE99": 0.994976068251408,
+    "fopt_mean": 0.013202685605880426,
+    "fopt_sd": 0.10834627247109002
+  },
+  {
+    "label": "table1_Rastrigin_d2_min",
+    "name": "Rastrigin",
+    "dim": 2,
+    "maximize": false,
+    "n_replications": 500,
+    "best_opt": 0.0,
+    "algo": "GenSA",
+    "time_avg": 0.07505881803506054,
+    "rMSE": 5.574795321383691e-14,
+    "AE50": 1.0658141036401503e-14,
+    "AE95": 7.815970093361102e-14,
+    "AE99": 1.7827517240220856e-13,
+    "fopt_mean": 2.2922108655620832e-14,
+    "fopt_sd": 5.086832408387626e-14
+  }
+]

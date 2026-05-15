@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import inspect
+import math
 import time
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -13,6 +16,13 @@ from .methods import METHOD_REGISTRY, get_method
 
 
 SMCO_VARIANTS = {"SMCO", "SMCO_R", "SMCO_BR"}
+GLOBAL_METHODS = {"GenSA", "DEoptim", "GA", "PSO"}
+COMPARISON_SMCO_DEFAULTS: dict[str, Any] = {
+    "iter_max": 300,
+    "bounds_buffer": 0.05,
+    "buffer_rand": True,
+    "tol_conv": 1e-8,
+}
 
 
 @dataclass(eq=False)
@@ -38,6 +48,32 @@ def generate_unif_starts(
         rng = np.random.default_rng()
     d = bounds_lower.size
     return bounds_lower + rng.uniform(size=(n_starts, d)) * (bounds_upper - bounds_lower)
+
+
+def _call_with_supported_kwargs(fn, *args, **kwargs):
+    signature = inspect.signature(fn)
+    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values()):
+        supported = kwargs
+    else:
+        supported = {key: value for key, value in kwargs.items() if key in signature.parameters}
+    return fn(*args, **supported)
+
+
+def _smco_variant_options(algo_name: str, smco_options: dict, algo_seed: int) -> dict:
+    options = dict(COMPARISON_SMCO_DEFAULTS)
+    # n_starts 只用于生成共享起点，不应继续透传给 SMCO。
+    options.update({key: value for key, value in smco_options.items() if key != "n_starts"})
+    if algo_name in ("SMCO_R", "SMCO_BR"):
+        options.setdefault("refine_ratio", 0.5)
+    if algo_name == "SMCO_BR":
+        base_iter_max = int(options["iter_max"])
+        # SMCO-BR 会执行 regular 和 boosted 两次 refine；比较实验中将单次预算减半。
+        options["iter_max"] = int(math.ceil(base_iter_max / 2.0))
+        options.setdefault("iter_boost", 99)
+    else:
+        options.pop("iter_boost", None)
+    options["seed"] = algo_seed
+    return options
 
 
 def run_comparison(
@@ -91,17 +127,7 @@ def run_comparison(
                 # SMCO 变体必须走各自公开包装器，不能统一退化成 smco_multi。
                 variant_map = {"SMCO": smco, "SMCO_R": smco_r, "SMCO_BR": smco_br}
                 variant_fn = variant_map[algo_name]
-                variant_options = {
-                    "iter_max": smco_options.get("iter_max", 300),
-                    "bounds_buffer": 0.05,
-                    "buffer_rand": True,
-                    "tol_conv": 1e-8,
-                    "seed": algo_seed,
-                }
-                if algo_name in ("SMCO_R", "SMCO_BR"):
-                    variant_options["refine_ratio"] = 0.5
-                if algo_name == "SMCO_BR":
-                    variant_options["iter_boost"] = 99
+                variant_options = _smco_variant_options(algo_name, smco_options, algo_seed)
                 smco_result = variant_fn(
                     f,
                     bounds_lower,
@@ -110,9 +136,10 @@ def run_comparison(
                     **variant_options,
                 )
                 fopt = smco_result.best_result.f_optimal
-            elif algo_name in ("GenSA", "DEoptim", "GA", "PSO"):
+            elif algo_name in GLOBAL_METHODS:
                 opt_fn = get_method(algo_name)
-                result = opt_fn(
+                result = _call_with_supported_kwargs(
+                    opt_fn,
                     f, bounds_lower, bounds_upper,
                     maximize=True,
                     max_iter=smco_options.get("iter_max", 300),
@@ -121,11 +148,13 @@ def run_comparison(
                 fopt = result.f_optimal
             else:
                 opt_fn = get_method(algo_name)
-                result = opt_fn(
+                result = _call_with_supported_kwargs(
+                    opt_fn,
                     f, bounds_lower, bounds_upper,
                     start_points=start_points,
                     maximize=True,
                     max_iter=smco_options.get("iter_max", 300),
+                    seed=algo_seed,
                 )
                 fopt = result.f_optimal
 

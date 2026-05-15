@@ -1,0 +1,18 @@
+[
+  {
+    "label": "table2_Rastrigin_d200_min",
+    "name": "Rastrigin",
+    "dim": 200,
+    "maximize": false,
+    "n_replications": 10,
+    "best_opt": 265.9360395990475,
+    "algo": "SMCO_BR",
+    "time_avg": 30.131854423403276,
+    "rMSE": 61.09651109749808,
+    "AE50": 50.823064105005415,
+    "AE95": 93.66391154402918,
+    "AE99": 97.66797967319141,
+    "fopt_mean": 320.6894078715908,
+    "fopt_sd": 28.574509446512533
+  }
+]

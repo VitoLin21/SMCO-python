@@ -1,0 +1,18 @@
+[
+  {
+    "label": "table2_Michalewicz_d200_min",
+    "name": "Michalewicz",
+    "dim": 200,
+    "maximize": false,
+    "n_replications": 10,
+    "best_opt": -183.33972010456773,
+    "algo": "SMCO_BR",
+    "time_avg": 76.79567864610581,
+    "rMSE": 1.5853974587403394,
+    "AE50": 1.3607640595301547,
+    "AE95": 2.5566779453069013,
+    "AE99": 2.769357151512466,
+    "fopt_mean": -181.95269254942468,
+    "fopt_sd": 0.8094165686566182
+  }
+]

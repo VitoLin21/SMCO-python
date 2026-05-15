@@ -1,0 +1,34 @@
+[
+  {
+    "label": "table1_Griewank_d2_max",
+    "name": "Griewank",
+    "dim": 2,
+    "maximize": true,
+    "n_replications": 500,
+    "best_opt": 181.10750183470643,
+    "algo": "SMCO_BR",
+    "time_avg": 0.032645310054067525,
+    "rMSE": 0.27354647714431995,
+    "AE50": 0.07007058273470079,
+    "AE95": 0.4172848388875934,
+    "AE99": 0.525961735243789,
+    "fopt_mean": 180.96916670220347,
+    "fopt_sd": 0.2362258910803258
+  },
+  {
+    "label": "table1_Griewank_d2_max",
+    "name": "Griewank",
+    "dim": 2,
+    "maximize": true,
+    "n_replications": 500,
+    "best_opt": 181.10750183470643,
+    "algo": "GenSA",
+    "time_avg": 0.08620728715625592,
+    "rMSE": 0.1792108405321228,
+    "AE50": 2.9274360713316128e-12,
+    "AE95": 0.4089909162880758,
+    "AE99": 0.4089909163222237,
+    "fopt_mean": 181.02897557869068,
+    "fopt_sd": 0.1612518427614622
+  }
+]
