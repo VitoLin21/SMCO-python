@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from smco import SMCOResult, SingleResult, smco, smco_br, smco_multi, smco_r
+from smco import SMCOResult, SingleResult, smco, smco_br, smco_hb, smco_multi, smco_r
 from smco.optimizer import _split_refine_iterations
 
 
@@ -9,6 +9,7 @@ def test_public_api_exports_expected_symbols():
     assert callable(smco_r)
     assert callable(smco_br)
     assert callable(smco_multi)
+    assert callable(smco_hb)
 
 
 def test_single_result_fields_are_numpy_friendly():
