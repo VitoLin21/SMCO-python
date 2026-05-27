@@ -346,6 +346,78 @@ def _validate_evolution_control(
     return points, rate, strategy, factor, crossover
 
 
+def _sobol_replacements(
+    n_new: int,
+    bounds_lower: np.ndarray,
+    bounds_upper: np.ndarray,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    return generate_sobol_points(n_new, bounds_lower, bounds_upper, seed=int(rng.integers(0, 2**31)))
+
+
+def _binomial_crossover(
+    base: np.ndarray,
+    mutant: np.ndarray,
+    de_crossover: float,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    dim = int(base.size)
+    forced_j = int(rng.integers(0, dim))
+    mask = rng.uniform(size=dim) < de_crossover
+    mask[forced_j] = True
+    return np.where(mask, mutant, base)
+
+
+def _generate_evolution_points(
+    parents: np.ndarray,
+    scores: np.ndarray,
+    *,
+    n_new: int,
+    strategy: str,
+    bounds_lower: np.ndarray,
+    bounds_upper: np.ndarray,
+    de_factor: float,
+    de_crossover: float,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    n_new = int(n_new)
+    bounds_lower, bounds_upper = _validate_bounds(bounds_lower, bounds_upper)
+    if n_new < 1:
+        return np.empty((0, bounds_lower.size), dtype=float)
+
+    parents = np.asarray(parents, dtype=float)
+    scores = np.asarray(scores, dtype=float)
+    if parents.ndim != 2 or parents.shape[1] != bounds_lower.size:
+        raise ValueError("parents must be a two-dimensional array with one column per bound")
+    if scores.ndim != 1 or scores.shape[0] != parents.shape[0]:
+        raise ValueError("scores must be a one-dimensional array with one value per parent")
+    if not np.all(np.isfinite(parents)) or not np.all(np.isfinite(scores)):
+        raise ValueError("parents and scores must contain only finite values")
+    if strategy not in EVOLUTION_STRATEGIES:
+        raise ValueError("evolution_strategy must be one of current-to-best1bin, rand1bin, best1bin, sobol")
+    if strategy == "sobol" or parents.shape[0] < 3:
+        return _sobol_replacements(n_new, bounds_lower, bounds_upper, rng)
+
+    best = parents[int(np.argmax(scores))]
+    children: list[np.ndarray] = []
+    for _ in range(n_new):
+        base_index = int(rng.integers(0, parents.shape[0]))
+        base = parents[base_index]
+        if strategy == "rand1bin":
+            a_idx, b_idx, c_idx = rng.choice(parents.shape[0], size=3, replace=False)
+            mutant = parents[a_idx] + de_factor * (parents[b_idx] - parents[c_idx])
+        elif strategy == "current-to-best1bin":
+            choices = [idx for idx in range(parents.shape[0]) if idx != base_index]
+            b_idx, c_idx = rng.choice(choices, size=2, replace=False)
+            mutant = base + de_factor * (best - base) + de_factor * (parents[b_idx] - parents[c_idx])
+        elif strategy == "best1bin":
+            b_idx, c_idx = rng.choice(parents.shape[0], size=2, replace=False)
+            mutant = best + de_factor * (parents[b_idx] - parents[c_idx])
+        child = _binomial_crossover(base, mutant, de_crossover, rng)
+        children.append(np.clip(child, bounds_lower, bounds_upper))
+    return np.vstack(children)
+
+
 def _merge_control(user_control: dict[str, Any] | None) -> dict[str, Any]:
     control = dict(DEFAULT_CONTROL)
     if user_control:

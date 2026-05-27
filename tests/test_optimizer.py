@@ -2,7 +2,13 @@ import numpy as np
 import pytest
 from smco import SMCOResult, SingleResult, smco, smco_br, smco_multi, smco_r
 from smco import smco_br_evo, smco_evo, smco_r_evo
-from smco.optimizer import SMCOState, _initialize_smco_state, _run_smco_state_until, _split_refine_iterations
+from smco.optimizer import (
+    SMCOState,
+    _generate_evolution_points,
+    _initialize_smco_state,
+    _run_smco_state_until,
+    _split_refine_iterations,
+)
 
 
 def test_public_api_exports_expected_symbols():
@@ -90,6 +96,53 @@ def test_smco_br_evo_uses_shared_evolution_control_validation():
             seed=123,
             de_crossover=None,
         )
+
+
+@pytest.mark.parametrize("strategy", ["rand1bin", "current-to-best1bin", "best1bin", "sobol"])
+def test_generate_evolution_points_supports_configured_strategies(strategy):
+    parents = np.array(
+        [
+            [-0.8, -0.4],
+            [-0.2, 0.1],
+            [0.3, 0.5],
+            [0.7, -0.6],
+        ],
+        dtype=float,
+    )
+    scores = np.array([0.1, 0.5, 0.9, 0.2], dtype=float)
+    generated = _generate_evolution_points(
+        parents,
+        scores,
+        n_new=3,
+        strategy=strategy,
+        bounds_lower=np.array([-1.0, -1.0]),
+        bounds_upper=np.array([1.0, 1.0]),
+        de_factor=0.8,
+        de_crossover=0.7,
+        rng=np.random.default_rng(123),
+    )
+
+    assert generated.shape == (3, 2)
+    assert np.all(generated >= -1.0)
+    assert np.all(generated <= 1.0)
+
+
+def test_generate_evolution_points_falls_back_to_sobol_when_parent_pool_is_too_small():
+    generated = _generate_evolution_points(
+        np.array([[0.0, 0.0], [0.5, 0.5]], dtype=float),
+        np.array([1.0, 0.5], dtype=float),
+        n_new=2,
+        strategy="rand1bin",
+        bounds_lower=np.array([-1.0, -1.0]),
+        bounds_upper=np.array([1.0, 1.0]),
+        de_factor=0.8,
+        de_crossover=0.7,
+        rng=np.random.default_rng(123),
+    )
+
+    assert generated.shape == (2, 2)
+    assert np.all(generated >= -1.0)
+    assert np.all(generated <= 1.0)
 
 
 def test_single_result_fields_are_numpy_friendly():
