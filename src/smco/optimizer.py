@@ -884,6 +884,34 @@ def smco_multi(
     )
 
 
+def _build_multi_result(
+    results: list[SingleResult],
+    control: dict[str, Any],
+    *,
+    extra_summary: dict[str, Any] | None = None,
+) -> SMCOResult:
+    values = np.array([result.f_optimal for result in results], dtype=float)
+    best_idx = int(np.argmax(values))
+    endpoints = np.vstack([result.x_optimal for result in results])
+    iterations = np.array([result.iterations for result in results], dtype=float)
+    summary = {
+        "n_starts": control["n_starts"],
+        "mean_iterations": float(np.mean(iterations)),
+        "std_values": float(np.std(values, ddof=1)) if values.size > 1 else 0.0,
+        "endpoints": endpoints,
+        "values": values,
+    }
+    if extra_summary:
+        summary.update(extra_summary)
+
+    return SMCOResult(
+        best_result=results[best_idx],
+        all_results=results,
+        opt_control=control,
+        summary=summary,
+    )
+
+
 def _run_evolutionary_states(
     f: Objective,
     bounds_lower: np.ndarray,
@@ -1001,6 +1029,109 @@ def _run_evolutionary_states(
     return results, history
 
 
+def _refine_evolutionary_results(
+    f: Objective,
+    bounds_lower: np.ndarray,
+    bounds_upper: np.ndarray,
+    results: list[SingleResult],
+    control: dict[str, Any],
+    *,
+    iter_max_refine: int,
+    rng: np.random.Generator,
+) -> list[SingleResult]:
+    refined_results: list[SingleResult] = []
+    for result in results:
+        if (
+            bool(control["use_runmax"])
+            and result.x_runmax is not None
+            and result.f_runmax is not None
+            and result.f_runmax > result.f_optimal
+        ):
+            start_point_refine = np.array(result.x_runmax, dtype=float, copy=True)
+        else:
+            start_point_refine = np.array(result.x_optimal, dtype=float, copy=True)
+
+        refine_result = _single(
+            f,
+            bounds_lower,
+            bounds_upper,
+            start_point_refine,
+            bounds_buffer=0.0,
+            buffer_rand=bool(control["buffer_rand"]),
+            iter_max=iter_max_refine,
+            iter_nstart=control["iter_nstart"],
+            iter_boost=control["iter_boost"] + 1000,
+            tol_conv=control["tol_conv"],
+            partial_option=str(control["partial_option"]),
+            use_runmax=bool(control["use_runmax"]),
+            rng=rng,
+        )
+        _clip_result_to_bounds(refine_result, f, bounds_lower, bounds_upper)
+        if bool(control["use_runmax"]):
+            _promote_runmax(refine_result)
+        refined_results.append(refine_result)
+
+    return refined_results
+
+
+def _run_evolutionary_multi_branch(
+    f: Objective,
+    bounds_lower: np.ndarray,
+    bounds_upper: np.ndarray,
+    starts: np.ndarray,
+    control: dict[str, Any],
+    *,
+    evolution_points: tuple[float, ...],
+    elimination_rate: float,
+    evolution_strategy: str,
+    de_factor: float,
+    de_crossover: float,
+) -> SMCOResult:
+    rng = np.random.default_rng(control["seed"])
+    iter_max_initial, iter_max_refine = _split_refine_iterations(
+        control["iter_max"],
+        control["refine_ratio"],
+        bool(control["refine_search"]),
+    )
+    results, evolution_history = _run_evolutionary_states(
+        f,
+        bounds_lower,
+        bounds_upper,
+        starts,
+        control,
+        evolution_points=evolution_points,
+        elimination_rate=elimination_rate,
+        evolution_strategy=evolution_strategy,
+        de_factor=de_factor,
+        de_crossover=de_crossover,
+        iter_max=iter_max_initial,
+        iter_boost=control["iter_boost"],
+        rng=rng,
+    )
+
+    if bool(control["refine_search"]) and iter_max_refine > 0:
+        results = _refine_evolutionary_results(
+            f,
+            bounds_lower,
+            bounds_upper,
+            results,
+            control,
+            iter_max_refine=iter_max_refine,
+            rng=rng,
+        )
+
+    return _build_multi_result(
+        results,
+        control,
+        extra_summary={
+            "evolution_history": evolution_history,
+            "evolution_strategy": evolution_strategy,
+            "evolution_points": evolution_points,
+            "elimination_rate": elimination_rate,
+        },
+    )
+
+
 def smco_evo_multi(
     f: Objective,
     bounds_lower: Any,
@@ -1034,7 +1165,36 @@ def smco_evo_multi(
     control["evolution_strategy"] = strategy
     control["de_factor"] = factor
     control["de_crossover"] = crossover
-    results, evolution_history = _run_evolutionary_states(
+
+    if control["iter_boost"] <= 0:
+        return _run_evolutionary_multi_branch(
+            f,
+            lower,
+            upper,
+            starts,
+            control,
+            evolution_points=points,
+            elimination_rate=rate,
+            evolution_strategy=strategy,
+            de_factor=factor,
+            de_crossover=crossover,
+        )
+
+    regular_control = dict(control)
+    regular_control["iter_boost"] = 0
+    regular = _run_evolutionary_multi_branch(
+        f,
+        lower,
+        upper,
+        starts,
+        regular_control,
+        evolution_points=points,
+        elimination_rate=rate,
+        evolution_strategy=strategy,
+        de_factor=factor,
+        de_crossover=crossover,
+    )
+    boosted = _run_evolutionary_multi_branch(
         f,
         lower,
         upper,
@@ -1045,32 +1205,13 @@ def smco_evo_multi(
         evolution_strategy=strategy,
         de_factor=factor,
         de_crossover=crossover,
-        iter_max=control["iter_max"],
-        iter_boost=control["iter_boost"],
-        rng=rng,
     )
-
-    values = np.array([result.f_optimal for result in results], dtype=float)
-    best_idx = int(np.argmax(values))
-    endpoints = np.vstack([result.x_optimal for result in results])
-    iterations = np.array([result.iterations for result in results], dtype=float)
-    summary = {
-        "n_starts": control["n_starts"],
-        "mean_iterations": float(np.mean(iterations)),
-        "std_values": float(np.std(values, ddof=1)) if values.size > 1 else 0.0,
-        "endpoints": endpoints,
-        "values": values,
-        "evolution_history": evolution_history,
-        "evolution_strategy": strategy,
-        "evolution_points": points,
-        "elimination_rate": rate,
-    }
-
+    winner = boosted if boosted.best_result.f_optimal > regular.best_result.f_optimal else regular
     return SMCOResult(
-        best_result=results[best_idx],
-        all_results=results,
-        opt_control=control,
-        summary=summary,
+        best_result=winner.best_result,
+        all_results=winner.all_results,
+        opt_control=dict(control),
+        summary=dict(winner.summary),
     )
 
 
@@ -1153,17 +1294,26 @@ def smco_r_evo(
     **kwargs: Any,
 ) -> SMCOResult:
     control = dict(kwargs)
-    _validate_evolution_control(
-        control.pop("evolution_points", (0.5, 0.75)),
-        control.pop("elimination_rate", 0.25),
-        control.pop("evolution_strategy", "rand1bin"),
-        control.pop("de_factor", 0.8),
-        control.pop("de_crossover", 0.7),
-    )
+    evolution_points = control.pop("evolution_points", (0.5, 0.75))
+    elimination_rate = control.pop("elimination_rate", 0.25)
+    evolution_strategy = control.pop("evolution_strategy", "rand1bin")
+    de_factor = control.pop("de_factor", 0.8)
+    de_crossover = control.pop("de_crossover", 0.7)
     control["refine_search"] = True
     control["iter_boost"] = 0
     control.setdefault("refine_ratio", 0.5)
-    return smco_multi(f, bounds_lower, bounds_upper, start_points, control)
+    return smco_evo_multi(
+        f,
+        bounds_lower,
+        bounds_upper,
+        start_points,
+        control,
+        evolution_points=evolution_points,
+        elimination_rate=elimination_rate,
+        evolution_strategy=evolution_strategy,
+        de_factor=de_factor,
+        de_crossover=de_crossover,
+    )
 
 
 def smco_br_evo(
@@ -1175,14 +1325,23 @@ def smco_br_evo(
     **kwargs: Any,
 ) -> SMCOResult:
     control = dict(kwargs)
-    _validate_evolution_control(
-        control.pop("evolution_points", (0.5, 0.75)),
-        control.pop("elimination_rate", 0.25),
-        control.pop("evolution_strategy", "rand1bin"),
-        control.pop("de_factor", 0.8),
-        control.pop("de_crossover", 0.7),
-    )
+    evolution_points = control.pop("evolution_points", (0.5, 0.75))
+    elimination_rate = control.pop("elimination_rate", 0.25)
+    evolution_strategy = control.pop("evolution_strategy", "rand1bin")
+    de_factor = control.pop("de_factor", 0.8)
+    de_crossover = control.pop("de_crossover", 0.7)
     control["refine_search"] = True
     control["iter_boost"] = iter_boost
     control.setdefault("refine_ratio", 0.5)
-    return smco_multi(f, bounds_lower, bounds_upper, start_points, control)
+    return smco_evo_multi(
+        f,
+        bounds_lower,
+        bounds_upper,
+        start_points,
+        control,
+        evolution_points=evolution_points,
+        elimination_rate=elimination_rate,
+        evolution_strategy=evolution_strategy,
+        de_factor=de_factor,
+        de_crossover=de_crossover,
+    )

@@ -140,6 +140,40 @@ def test_smco_evo_is_reproducible_with_same_seed():
     assert np.allclose(first.summary["endpoints"], second.summary["endpoints"])
 
 
+def test_smco_r_evo_runs_refine_search_and_records_evolution_metadata():
+    result = smco_r_evo(
+        lambda x: -float(np.sum((x - 0.25) ** 2)),
+        [-1.0, -1.0],
+        [1.0, 1.0],
+        n_starts=8,
+        iter_max=60,
+        refine_ratio=0.5,
+        seed=456,
+        tol_conv=1e-12,
+    )
+
+    assert result.opt_control["refine_search"] is True
+    assert result.summary["evolution_strategy"] == "rand1bin"
+    assert len(result.summary["evolution_history"]) >= 1
+    assert np.isfinite(result.best_result.f_optimal)
+
+
+def test_smco_br_evo_preserves_iter_boost_control():
+    result = smco_br_evo(
+        lambda x: -float(np.sum((x - 0.3) ** 2)),
+        [-1.0, -1.0],
+        [1.0, 1.0],
+        n_starts=6,
+        iter_max=40,
+        iter_boost=20,
+        seed=789,
+    )
+
+    assert result.opt_control["iter_boost"] == 20
+    assert result.summary["evolution_strategy"] == "rand1bin"
+    assert np.isfinite(result.best_result.f_optimal)
+
+
 def test_run_evolutionary_states_caps_replacement_budget_to_remaining_global_boundary(monkeypatch):
     calls: list[tuple[int, int]] = []
 
