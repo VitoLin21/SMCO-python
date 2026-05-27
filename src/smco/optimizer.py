@@ -1069,6 +1069,9 @@ def _refine_evolutionary_results(
         _clip_result_to_bounds(refine_result, f, bounds_lower, bounds_upper)
         if bool(control["use_runmax"]):
             _promote_runmax(refine_result)
+        refine_result.iterations = int(
+            result.iterations + refine_result.iterations - control["iter_nstart"]
+        )
         refined_results.append(refine_result)
 
     return refined_results
@@ -1109,7 +1112,7 @@ def _run_evolutionary_multi_branch(
         rng=rng,
     )
 
-    if bool(control["refine_search"]) and iter_max_refine > 0:
+    if bool(control["refine_search"]):
         results = _refine_evolutionary_results(
             f,
             bounds_lower,
@@ -1206,12 +1209,20 @@ def smco_evo_multi(
         de_factor=factor,
         de_crossover=crossover,
     )
-    winner = boosted if boosted.best_result.f_optimal > regular.best_result.f_optimal else regular
+    selected_branch = "boosted" if boosted.best_result.f_optimal > regular.best_result.f_optimal else "regular"
+    winner = boosted if selected_branch == "boosted" else regular
+    summary = dict(winner.summary)
+    summary["boost_selection"] = {
+        "iter_boost": int(control["iter_boost"]),
+        "selected_branch": selected_branch,
+        "regular_best": float(regular.best_result.f_optimal),
+        "boosted_best": float(boosted.best_result.f_optimal),
+    }
     return SMCOResult(
         best_result=winner.best_result,
         all_results=winner.all_results,
         opt_control=dict(control),
-        summary=dict(winner.summary),
+        summary=summary,
     )
 
 

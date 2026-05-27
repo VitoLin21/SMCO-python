@@ -158,6 +158,85 @@ def test_smco_r_evo_runs_refine_search_and_records_evolution_metadata():
     assert np.isfinite(result.best_result.f_optimal)
 
 
+def test_smco_r_evo_runs_zero_buffer_refine_even_when_refine_ratio_is_zero(monkeypatch):
+    refine_calls: list[tuple[float, int, int]] = []
+
+    monkeypatch.setattr(
+        "smco.optimizer._run_evolutionary_states",
+        lambda *args, **kwargs: (
+            [SingleResult(x_optimal=np.array([0.1]), f_optimal=0.1, iterations=7)],
+            [{"iteration": 10, "generated_count": 0}],
+        ),
+    )
+
+    def fake_single(
+        f,
+        bounds_lower,
+        bounds_upper,
+        start_point,
+        *,
+        bounds_buffer,
+        buffer_rand,
+        iter_max,
+        iter_nstart,
+        iter_boost,
+        tol_conv,
+        partial_option,
+        use_runmax,
+        rng,
+    ):
+        refine_calls.append((float(bounds_buffer), int(iter_max), int(iter_boost)))
+        return SingleResult(x_optimal=np.array([0.9]), f_optimal=0.9, iterations=int(iter_nstart))
+
+    monkeypatch.setattr("smco.optimizer._single", fake_single)
+
+    result = smco_r_evo(
+        lambda x: float(x[0]),
+        [-1.0],
+        [1.0],
+        start_points=np.array([[0.0]]),
+        iter_max=10,
+        refine_ratio=0.0,
+        seed=123,
+    )
+
+    assert refine_calls == [(0.0, 0, 1000)]
+    assert result.best_result.f_optimal == pytest.approx(0.9)
+
+
+def test_smco_r_evo_refine_keeps_full_budget_iteration_accounting(monkeypatch):
+    monkeypatch.setattr(
+        "smco.optimizer._run_evolutionary_states",
+        lambda *args, **kwargs: (
+            [SingleResult(x_optimal=np.array([0.2]), f_optimal=0.2, iterations=17)],
+            [{"iteration": 8, "generated_count": 1}],
+        ),
+    )
+
+    monkeypatch.setattr(
+        "smco.optimizer._single",
+        lambda *args, **kwargs: SingleResult(
+            x_optimal=np.array([0.8]),
+            f_optimal=0.8,
+            iterations=6,
+        ),
+    )
+
+    result = smco_r_evo(
+        lambda x: float(x[0]),
+        [-1.0],
+        [1.0],
+        start_points=np.array([[0.0]]),
+        iter_max=20,
+        refine_ratio=0.5,
+        seed=123,
+    )
+
+    assert result.all_results[0].iterations == 22
+    assert result.summary["mean_iterations"] == pytest.approx(22.0)
+    assert result.summary["evolution_history"] == [{"iteration": 8, "generated_count": 1}]
+
+
 def test_smco_br_evo_preserves_iter_boost_control():
     result = smco_br_evo(
         lambda x: -float(np.sum((x - 0.3) ** 2)),
@@ -172,6 +251,44 @@ def test_smco_br_evo_preserves_iter_boost_control():
     assert result.opt_control["iter_boost"] == 20
     assert result.summary["evolution_strategy"] == "rand1bin"
     assert np.isfinite(result.best_result.f_optimal)
+
+
+def test_smco_br_evo_records_regular_vs_boosted_competition():
+    objective = lambda x: float(np.sin(9.0 * x[0]) - 0.15 * x[0] ** 2)
+
+    regular = smco_br_evo(
+        objective,
+        [-2.0],
+        [2.0],
+        n_starts=6,
+        iter_max=24,
+        iter_boost=0,
+        seed=321,
+        tol_conv=1e-12,
+    )
+    boosted = smco_br_evo(
+        objective,
+        [-2.0],
+        [2.0],
+        n_starts=6,
+        iter_max=24,
+        iter_boost=20,
+        seed=321,
+        tol_conv=1e-12,
+    )
+
+    assert regular.summary["evolution_strategy"] == "rand1bin"
+    assert boosted.summary["evolution_strategy"] == "rand1bin"
+    assert "boost_selection" not in regular.summary
+    assert boosted.opt_control["iter_boost"] == 20
+    assert np.isfinite(boosted.best_result.f_optimal)
+
+    selection = boosted.summary["boost_selection"]
+    assert selection["iter_boost"] == 20
+    assert selection["selected_branch"] in {"regular", "boosted"}
+    assert np.isfinite(selection["regular_best"])
+    assert np.isfinite(selection["boosted_best"])
+    assert selection["regular_best"] == pytest.approx(regular.best_result.f_optimal)
 
 
 def test_run_evolutionary_states_caps_replacement_budget_to_remaining_global_boundary(monkeypatch):
