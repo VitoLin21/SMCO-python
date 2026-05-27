@@ -37,6 +37,7 @@ class SMCOState:
     iterations: int = 0  # SingleResult iteration count for the last completed n.
     initial_n: int = 0  # Fixed n_boost_1 anchor for absolute target boundaries.
     stopped_target_n: int | None = None
+    birth_iteration: int = 0  # Global evolutionary boundary where this trajectory was created.
 
     def ranking_value(self) -> float:
         if self.f_runmax is not None:
@@ -477,6 +478,7 @@ def _initialize_smco_state(
     iter_nstart: int,
     iter_boost: int,
     use_runmax: bool,
+    birth_iteration: int = 0,
 ) -> SMCOState:
     x_current = np.array(start_point, dtype=float, copy=True)
     f_current = float(f(x_current))
@@ -493,6 +495,7 @@ def _initialize_smco_state(
         f_runmax=f_runmax,
         iterations=0,
         initial_n=n_boost_1,
+        birth_iteration=int(birth_iteration),
     )
 
 
@@ -895,6 +898,7 @@ def _run_evolutionary_states(
             iter_nstart=control["iter_nstart"],
             iter_boost=iter_boost,
             use_runmax=bool(control["use_runmax"]),
+            birth_iteration=0,
         )
         for start in starts
     ]
@@ -909,7 +913,7 @@ def _run_evolutionary_states(
                 bounds_upper,
                 control["bounds_buffer"],
                 bool(control["buffer_rand"]),
-                boundary,
+                boundary - int(state.birth_iteration),
                 control["tol_conv"],
                 str(control["partial_option"]),
                 bool(control["use_runmax"]),
@@ -945,6 +949,7 @@ def _run_evolutionary_states(
                 iter_nstart=control["iter_nstart"],
                 iter_boost=iter_boost + boundary,
                 use_runmax=bool(control["use_runmax"]),
+                birth_iteration=boundary,
             )
             for point in generated
         ]
@@ -971,7 +976,7 @@ def _run_evolutionary_states(
             bounds_upper,
             control["bounds_buffer"],
             bool(control["buffer_rand"]),
-            iter_max,
+            iter_max - int(state.birth_iteration),
             control["tol_conv"],
             str(control["partial_option"]),
             bool(control["use_runmax"]),
@@ -1014,6 +1019,11 @@ def smco_evo_multi(
         opt_control,
     )
     rng = np.random.default_rng(control["seed"])
+    control["evolution_points"] = points
+    control["elimination_rate"] = rate
+    control["evolution_strategy"] = strategy
+    control["de_factor"] = factor
+    control["de_crossover"] = crossover
     results, evolution_history = _run_evolutionary_states(
         f,
         lower,

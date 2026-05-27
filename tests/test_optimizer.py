@@ -6,6 +6,7 @@ from smco.optimizer import (
     SMCOState,
     _generate_evolution_points,
     _initialize_smco_state,
+    _run_evolutionary_states,
     _run_smco_state_until,
     _split_refine_iterations,
     generate_sobol_points,
@@ -120,6 +121,11 @@ def test_smco_evo_records_evolution_history_and_uses_rand1bin_by_default():
     assert all(event["eliminated_count"] == 2 for event in history)
     assert all(event["generated_count"] == 2 for event in history)
     assert len(result.all_results) == 8
+    assert result.opt_control["evolution_strategy"] == "rand1bin"
+    assert result.opt_control["evolution_points"] == (0.5, 0.75)
+    assert result.opt_control["elimination_rate"] == pytest.approx(0.25)
+    assert result.opt_control["de_factor"] == pytest.approx(0.8)
+    assert result.opt_control["de_crossover"] == pytest.approx(0.7)
 
 
 def test_smco_evo_is_reproducible_with_same_seed():
@@ -132,6 +138,97 @@ def test_smco_evo_is_reproducible_with_same_seed():
     assert np.allclose(first.best_result.x_optimal, second.best_result.x_optimal)
     assert first.best_result.f_optimal == pytest.approx(second.best_result.f_optimal)
     assert np.allclose(first.summary["endpoints"], second.summary["endpoints"])
+
+
+def test_run_evolutionary_states_caps_replacement_budget_to_remaining_global_boundary(monkeypatch):
+    calls: list[tuple[int, int]] = []
+
+    def fake_run_state_until(
+        state,
+        f,
+        bounds_lower,
+        bounds_upper,
+        bounds_buffer,
+        buffer_rand,
+        iter_target,
+        tol_conv,
+        partial_option,
+        use_runmax,
+        rng,
+    ):
+        calls.append((int(state.iter_boost), int(iter_target)))
+        state.current_n = int(state.initial_n) + int(iter_target) + 1
+        state.iterations = state.current_n - 1 - int(state.iter_boost)
+        state.stopped_target_n = int(state.initial_n) + int(iter_target)
+
+    monkeypatch.setattr("smco.optimizer._run_smco_state_until", fake_run_state_until)
+    monkeypatch.setattr(
+        "smco.optimizer._generate_evolution_points",
+        lambda *args, **kwargs: np.array([[9.0], [8.0]], dtype=float),
+    )
+
+    results, history = _run_evolutionary_states(
+        lambda x: float(x[0]),
+        np.array([0.0]),
+        np.array([10.0]),
+        np.array([[4.0], [3.0], [2.0], [1.0]], dtype=float),
+        {
+            "iter_nstart": 1,
+            "bounds_buffer": 0.0,
+            "buffer_rand": False,
+            "tol_conv": 1e-12,
+            "partial_option": "center",
+            "use_runmax": False,
+        },
+        evolution_points=(0.5,),
+        elimination_rate=0.5,
+        evolution_strategy="sobol",
+        de_factor=0.8,
+        de_crossover=0.7,
+        iter_max=8,
+        iter_boost=0,
+        rng=np.random.default_rng(123),
+    )
+
+    assert len(history) == 1
+    assert len(results) == 4
+    assert calls[:4] == [(0, 4), (0, 4), (0, 4), (0, 4)]
+    assert calls[4:] == [(0, 8), (0, 8), (4, 4), (4, 4)]
+
+
+def test_smco_evo_use_runmax_promotes_public_best_result():
+    objective = lambda x: float(np.sin(10.0 * x[0]) - 0.1 * x[0] ** 2)
+
+    promoted = smco_evo(
+        objective,
+        [-2.0],
+        [2.0],
+        n_starts=4,
+        iter_max=6,
+        evolution_points=(0.5,),
+        elimination_rate=0.34,
+        seed=1,
+        use_runmax=True,
+        tol_conv=1e-12,
+    )
+    plain = smco_evo(
+        objective,
+        [-2.0],
+        [2.0],
+        n_starts=4,
+        iter_max=6,
+        evolution_points=(0.5,),
+        elimination_rate=0.34,
+        seed=1,
+        use_runmax=False,
+        tol_conv=1e-12,
+    )
+
+    assert promoted.best_result.x_runmax is not None
+    assert promoted.best_result.f_runmax is not None
+    assert promoted.best_result.f_optimal == pytest.approx(promoted.best_result.f_runmax)
+    assert np.allclose(promoted.best_result.x_optimal, promoted.best_result.x_runmax)
+    assert promoted.best_result.f_optimal > plain.best_result.f_optimal
 
 
 @pytest.mark.parametrize("strategy", ["rand1bin", "current-to-best1bin", "best1bin", "sobol"])
