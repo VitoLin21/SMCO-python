@@ -30,12 +30,13 @@ class SMCOState:
     x_current: np.ndarray
     f_current: float
     s_value: np.ndarray
-    current_n: int
+    current_n: int  # Next loop index n to execute.
     iter_boost: int
     x_runmax: np.ndarray | None
     f_runmax: float | None
-    iterations: int = 0
-    initial_n: int = 0
+    iterations: int = 0  # SingleResult iteration count for the last completed n.
+    initial_n: int = 0  # Fixed n_boost_1 anchor for absolute target boundaries.
+    stopped_target_n: int | None = None
 
     def ranking_value(self) -> float:
         if self.f_runmax is not None:
@@ -48,11 +49,9 @@ class SMCOState:
         return np.array(self.x_current, dtype=float, copy=True)
 
     def to_result(self) -> SingleResult:
-        x_optimal = self.ranking_point()
-        f_optimal = self.ranking_value()
         return SingleResult(
-            x_optimal=x_optimal,
-            f_optimal=f_optimal,
+            x_optimal=np.array(self.x_current, dtype=float, copy=True),
+            f_optimal=float(self.f_current),
             iterations=int(self.iterations),
             x_runmax=None if self.x_runmax is None else np.array(self.x_runmax, dtype=float, copy=True),
             f_runmax=None if self.f_runmax is None else float(self.f_runmax),
@@ -362,12 +361,8 @@ def _split_refine_iterations(iter_max: int, ratio: float, refine_search: bool) -
 
 def _initialize_smco_state(
     f: Objective,
-    bounds_lower: np.ndarray,
-    bounds_upper: np.ndarray,
     start_point: np.ndarray,
     *,
-    bounds_buffer: float,
-    buffer_rand: bool,
     iter_nstart: int,
     iter_boost: int,
     use_runmax: bool,
@@ -410,6 +405,8 @@ def _run_smco_state_until(
     initial_n = int(state.initial_n or state.current_n)
     target_n = initial_n + int(iter_target)
     iter_min_check = initial_n + int(math.ceil(iter_target / 2))
+    if state.stopped_target_n is not None and target_n <= state.stopped_target_n:
+        return
 
     while state.current_n <= target_n:
         n = state.current_n
@@ -452,6 +449,7 @@ def _run_smco_state_until(
         state.current_n = n + 1
         state.iterations = int(n - state.iter_boost)
         if n >= iter_min_check and abs(state.f_current - f_prev) < tol_conv:
+            state.stopped_target_n = target_n
             break
 
 
@@ -473,11 +471,7 @@ def _single(
 ) -> SingleResult:
     state = _initialize_smco_state(
         f,
-        bounds_lower,
-        bounds_upper,
         start_point,
-        bounds_buffer=bounds_buffer,
-        buffer_rand=buffer_rand,
         iter_nstart=iter_nstart,
         iter_boost=iter_boost,
         use_runmax=use_runmax,

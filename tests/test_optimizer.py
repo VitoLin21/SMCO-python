@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from smco import SMCOResult, SingleResult, smco, smco_br, smco_multi, smco_r
 from smco import smco_br_evo, smco_evo, smco_r_evo
-from smco.optimizer import _initialize_smco_state, _run_smco_state_until, _split_refine_iterations
+from smco.optimizer import SMCOState, _initialize_smco_state, _run_smco_state_until, _split_refine_iterations
 
 
 def test_public_api_exports_expected_symbols():
@@ -170,11 +170,7 @@ def test_stateful_smco_runner_matches_single_stage_result_without_evolution():
     rng = np.random.default_rng(123)
     state = _initialize_smco_state(
         objective,
-        lower,
-        upper,
         np.array([0.8]),
-        bounds_buffer=0.05,
-        buffer_rand=False,
         iter_nstart=1,
         iter_boost=0,
         use_runmax=True,
@@ -206,9 +202,149 @@ def test_stateful_smco_runner_matches_single_stage_result_without_evolution():
         tol_conv=1e-12,
     ).best_result
 
-    assert np.allclose(state_result.x_optimal, full.x_optimal)
-    assert state_result.f_optimal == pytest.approx(full.f_optimal)
+    assert np.allclose(state_result.x_runmax, full.x_optimal)
+    assert state_result.f_runmax == pytest.approx(full.f_optimal)
     assert state_result.f_runmax == pytest.approx(full.f_runmax)
+
+
+def test_stateful_smco_runner_staged_run_matches_one_shot_state_run():
+    def objective(x):
+        return -float((x[0] - 0.2) ** 2)
+
+    lower = np.array([-1.0])
+    upper = np.array([1.0])
+    staged = _initialize_smco_state(
+        objective,
+        np.array([0.8]),
+        iter_nstart=1,
+        iter_boost=0,
+        use_runmax=True,
+    )
+    one_shot = _initialize_smco_state(
+        objective,
+        np.array([0.8]),
+        iter_nstart=1,
+        iter_boost=0,
+        use_runmax=True,
+    )
+
+    _run_smco_state_until(
+        staged,
+        objective,
+        lower,
+        upper,
+        0.05,
+        False,
+        20,
+        1e-12,
+        "center",
+        True,
+        np.random.default_rng(123),
+    )
+    _run_smco_state_until(
+        staged,
+        objective,
+        lower,
+        upper,
+        0.05,
+        False,
+        40,
+        1e-12,
+        "center",
+        True,
+        np.random.default_rng(123),
+    )
+    _run_smco_state_until(
+        one_shot,
+        objective,
+        lower,
+        upper,
+        0.05,
+        False,
+        40,
+        1e-12,
+        "center",
+        True,
+        np.random.default_rng(123),
+    )
+
+    assert np.allclose(staged.x_current, one_shot.x_current)
+    assert staged.f_current == pytest.approx(one_shot.f_current)
+    assert np.allclose(staged.s_value, one_shot.s_value)
+    assert staged.current_n == one_shot.current_n
+    assert staged.iterations == one_shot.iterations
+    assert np.allclose(staged.x_runmax, one_shot.x_runmax)
+    assert staged.f_runmax == pytest.approx(one_shot.f_runmax)
+
+
+def test_stateful_smco_runner_repeated_call_after_early_stop_is_noop():
+    def objective(x):
+        return 1.0
+
+    lower = np.array([-1.0])
+    upper = np.array([1.0])
+    state = _initialize_smco_state(
+        objective,
+        np.array([0.8]),
+        iter_nstart=1,
+        iter_boost=0,
+        use_runmax=True,
+    )
+    _run_smco_state_until(
+        state,
+        objective,
+        lower,
+        upper,
+        0.05,
+        False,
+        40,
+        1e-12,
+        "center",
+        True,
+        np.random.default_rng(123),
+    )
+    current_n_after_stop = state.current_n
+    s_value_after_stop = np.array(state.s_value, copy=True)
+    iterations_after_stop = state.iterations
+
+    _run_smco_state_until(
+        state,
+        objective,
+        lower,
+        upper,
+        0.05,
+        False,
+        40,
+        1e-12,
+        "center",
+        True,
+        np.random.default_rng(123),
+    )
+
+    assert state.current_n == current_n_after_stop
+    assert np.allclose(state.s_value, s_value_after_stop)
+    assert state.iterations == iterations_after_stop
+
+
+def test_smco_state_to_result_keeps_current_point_separate_from_runmax():
+    state = SMCOState(
+        x_current=np.array([0.4]),
+        f_current=-0.04,
+        s_value=np.array([1.2]),
+        current_n=4,
+        iter_boost=0,
+        x_runmax=np.array([0.2]),
+        f_runmax=0.0,
+        iterations=3,
+        initial_n=1,
+    )
+
+    result = state.to_result()
+
+    assert np.allclose(result.x_optimal, [0.4])
+    assert result.f_optimal == pytest.approx(-0.04)
+    assert np.allclose(result.x_runmax, [0.2])
+    assert result.f_runmax == pytest.approx(0.0)
 
 
 def test_stateful_smco_runner_resumes_without_reinitializing_state():
@@ -220,11 +356,7 @@ def test_stateful_smco_runner_resumes_without_reinitializing_state():
     rng = np.random.default_rng(123)
     state = _initialize_smco_state(
         objective,
-        lower,
-        upper,
         np.array([0.8]),
-        bounds_buffer=0.05,
-        buffer_rand=False,
         iter_nstart=1,
         iter_boost=0,
         use_runmax=True,
