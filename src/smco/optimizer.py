@@ -647,6 +647,15 @@ def _promote_runmax(result: SingleResult) -> None:
         result.f_optimal = float(result.f_runmax)
 
 
+def _normalize_evolutionary_result_iterations(
+    result: SingleResult,
+    state: SMCOState,
+) -> None:
+    # evolutionary 公共结果统一按全局 boundary 口径报告 iterations，
+    # 使 survivor 与 replacement 在 summary 中可直接比较。
+    result.iterations = int(result.iterations + state.birth_iteration)
+
+
 def _single_refine(
     f: Objective,
     bounds_lower: np.ndarray,
@@ -983,6 +992,7 @@ def _run_evolutionary_states(
             rng,
         )
         result = state.to_result()
+        _normalize_evolutionary_result_iterations(result, state)
         _clip_result_to_bounds(result, f, bounds_lower, bounds_upper)
         if bool(control["use_runmax"]):
             _promote_runmax(result)

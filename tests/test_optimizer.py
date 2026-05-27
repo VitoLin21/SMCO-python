@@ -231,6 +231,29 @@ def test_smco_evo_use_runmax_promotes_public_best_result():
     assert promoted.best_result.f_optimal > plain.best_result.f_optimal
 
 
+def test_smco_evo_reports_public_iterations_on_common_global_boundary_basis():
+    result = smco_evo(
+        lambda x: -float(np.sum((x - 0.1) ** 2)),
+        [-1.0, -1.0],
+        [1.0, 1.0],
+        n_starts=4,
+        iter_nstart=1,
+        iter_max=8,
+        evolution_points=(0.5,),
+        elimination_rate=0.5,
+        seed=123,
+        tol_conv=1e-12,
+        use_runmax=False,
+    )
+
+    assert result.summary["evolution_history"][0]["generated_count"] == 2
+    iterations = [single.iterations for single in result.all_results]
+    expected_iterations = result.opt_control["iter_nstart"] + result.opt_control["iter_max"]
+
+    assert iterations == [expected_iterations] * len(iterations)
+    assert result.summary["mean_iterations"] == pytest.approx(expected_iterations)
+
+
 @pytest.mark.parametrize("strategy", ["rand1bin", "current-to-best1bin", "best1bin", "sobol"])
 def test_generate_evolution_points_supports_configured_strategies(strategy):
     parents = np.array(
