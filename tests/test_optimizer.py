@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from smco import SMCOResult, SingleResult, smco, smco_br, smco_hb, smco_multi, smco_r
+from smco import SMCOResult, SingleResult, smco, smco_br, smco_multi, smco_r
 from smco import smco_br_evo, smco_evo, smco_r_evo
 from smco.optimizer import _initialize_smco_state, _run_smco_state_until, _split_refine_iterations
 
@@ -10,7 +10,6 @@ def test_public_api_exports_expected_symbols():
     assert callable(smco_r)
     assert callable(smco_br)
     assert callable(smco_multi)
-    assert callable(smco_hb)
 
 
 def test_public_api_exports_evolutionary_smco_variants():
