@@ -99,6 +99,41 @@ def test_smco_br_evo_uses_shared_evolution_control_validation():
         )
 
 
+def test_smco_evo_records_evolution_history_and_uses_rand1bin_by_default():
+    result = smco_evo(
+        lambda x: -float(np.sum((x - 0.1) ** 2)),
+        [-1.0, -1.0],
+        [1.0, 1.0],
+        n_starts=8,
+        iter_max=40,
+        evolution_points=(0.5, 0.75),
+        elimination_rate=0.25,
+        seed=123,
+        tol_conv=1e-12,
+    )
+
+    history = result.summary["evolution_history"]
+    assert result.summary["evolution_strategy"] == "rand1bin"
+    assert result.summary["evolution_points"] == (0.5, 0.75)
+    assert len(history) == 2
+    assert [event["iteration"] for event in history] == [20, 30]
+    assert all(event["eliminated_count"] == 2 for event in history)
+    assert all(event["generated_count"] == 2 for event in history)
+    assert len(result.all_results) == 8
+
+
+def test_smco_evo_is_reproducible_with_same_seed():
+    def objective(x):
+        return -float(np.sum((x + 0.15) ** 2))
+
+    first = smco_evo(objective, [-2.0, -2.0], [2.0, 2.0], n_starts=8, iter_max=35, seed=321)
+    second = smco_evo(objective, [-2.0, -2.0], [2.0, 2.0], n_starts=8, iter_max=35, seed=321)
+
+    assert np.allclose(first.best_result.x_optimal, second.best_result.x_optimal)
+    assert first.best_result.f_optimal == pytest.approx(second.best_result.f_optimal)
+    assert np.allclose(first.summary["endpoints"], second.summary["endpoints"])
+
+
 @pytest.mark.parametrize("strategy", ["rand1bin", "current-to-best1bin", "best1bin", "sobol"])
 def test_generate_evolution_points_supports_configured_strategies(strategy):
     parents = np.array(
