@@ -362,10 +362,25 @@ def _binomial_crossover(
     rng: np.random.Generator,
 ) -> np.ndarray:
     dim = int(base.size)
-    forced_j = int(rng.integers(0, dim))
+    changed_coordinates = np.flatnonzero(~np.isclose(mutant, base))
+    if changed_coordinates.size:
+        forced_j = int(rng.choice(changed_coordinates))
+    else:
+        forced_j = int(rng.integers(0, dim))
     mask = rng.uniform(size=dim) < de_crossover
     mask[forced_j] = True
     return np.where(mask, mutant, base)
+
+
+def _choice_excluding(
+    n_parents: int,
+    excluded_indices: set[int],
+    *,
+    size: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    candidates = np.array([idx for idx in range(n_parents) if idx not in excluded_indices], dtype=int)
+    return rng.choice(candidates, size=size, replace=False)
 
 
 def _generate_evolution_points(
@@ -395,23 +410,42 @@ def _generate_evolution_points(
         raise ValueError("parents and scores must contain only finite values")
     if strategy not in EVOLUTION_STRATEGIES:
         raise ValueError("evolution_strategy must be one of current-to-best1bin, rand1bin, best1bin, sobol")
-    if strategy == "sobol" or parents.shape[0] < 3:
+    if (
+        strategy == "sobol"
+        or (strategy in {"rand1bin", "current-to-best1bin"} and parents.shape[0] < 4)
+        or (strategy == "best1bin" and parents.shape[0] < 3)
+    ):
         return _sobol_replacements(n_new, bounds_lower, bounds_upper, rng)
 
-    best = parents[int(np.argmax(scores))]
+    best_index = int(np.argmax(scores))
+    best = parents[best_index]
     children: list[np.ndarray] = []
     for _ in range(n_new):
         base_index = int(rng.integers(0, parents.shape[0]))
         base = parents[base_index]
         if strategy == "rand1bin":
-            a_idx, b_idx, c_idx = rng.choice(parents.shape[0], size=3, replace=False)
+            a_idx, b_idx, c_idx = _choice_excluding(
+                parents.shape[0],
+                {base_index},
+                size=3,
+                rng=rng,
+            )
             mutant = parents[a_idx] + de_factor * (parents[b_idx] - parents[c_idx])
         elif strategy == "current-to-best1bin":
-            choices = [idx for idx in range(parents.shape[0]) if idx != base_index]
-            b_idx, c_idx = rng.choice(choices, size=2, replace=False)
+            b_idx, c_idx = _choice_excluding(
+                parents.shape[0],
+                {base_index, best_index},
+                size=2,
+                rng=rng,
+            )
             mutant = base + de_factor * (best - base) + de_factor * (parents[b_idx] - parents[c_idx])
         elif strategy == "best1bin":
-            b_idx, c_idx = rng.choice(parents.shape[0], size=2, replace=False)
+            b_idx, c_idx = _choice_excluding(
+                parents.shape[0],
+                {best_index},
+                size=2,
+                rng=rng,
+            )
             mutant = best + de_factor * (parents[b_idx] - parents[c_idx])
         child = _binomial_crossover(base, mutant, de_crossover, rng)
         children.append(np.clip(child, bounds_lower, bounds_upper))

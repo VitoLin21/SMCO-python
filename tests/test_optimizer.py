@@ -8,6 +8,7 @@ from smco.optimizer import (
     _initialize_smco_state,
     _run_smco_state_until,
     _split_refine_iterations,
+    generate_sobol_points,
 )
 
 
@@ -128,21 +129,116 @@ def test_generate_evolution_points_supports_configured_strategies(strategy):
 
 
 def test_generate_evolution_points_falls_back_to_sobol_when_parent_pool_is_too_small():
+    bounds_lower = np.array([-1.0, -1.0])
+    bounds_upper = np.array([1.0, 1.0])
+    rng = np.random.default_rng(123)
+    expected_seed = int(np.random.default_rng(123).integers(0, 2**31))
+
     generated = _generate_evolution_points(
         np.array([[0.0, 0.0], [0.5, 0.5]], dtype=float),
         np.array([1.0, 0.5], dtype=float),
         n_new=2,
         strategy="rand1bin",
-        bounds_lower=np.array([-1.0, -1.0]),
-        bounds_upper=np.array([1.0, 1.0]),
+        bounds_lower=bounds_lower,
+        bounds_upper=bounds_upper,
         de_factor=0.8,
         de_crossover=0.7,
-        rng=np.random.default_rng(123),
+        rng=rng,
     )
 
     assert generated.shape == (2, 2)
     assert np.all(generated >= -1.0)
     assert np.all(generated <= 1.0)
+    assert np.allclose(generated, generate_sobol_points(2, bounds_lower, bounds_upper, seed=expected_seed))
+
+
+@pytest.mark.parametrize("strategy", ["rand1bin", "current-to-best1bin"])
+def test_generate_evolution_points_uses_sobol_when_strategy_lacks_distinct_indices(strategy):
+    bounds_lower = np.array([-1.0, -1.0])
+    bounds_upper = np.array([1.0, 1.0])
+    parents = np.array([[-0.8, -0.4], [-0.2, 0.1], [0.3, 0.5]], dtype=float)
+    scores = np.array([0.1, 0.9, 0.2], dtype=float)
+    expected_seed = int(np.random.default_rng(456).integers(0, 2**31))
+
+    generated = _generate_evolution_points(
+        parents,
+        scores,
+        n_new=2,
+        strategy=strategy,
+        bounds_lower=bounds_lower,
+        bounds_upper=bounds_upper,
+        de_factor=0.8,
+        de_crossover=0.7,
+        rng=np.random.default_rng(456),
+    )
+
+    assert np.allclose(generated, generate_sobol_points(2, bounds_lower, bounds_upper, seed=expected_seed))
+
+
+def test_generate_evolution_points_is_reproducible_with_same_seed():
+    parents = np.array(
+        [
+            [-0.8, -0.4],
+            [-0.2, 0.1],
+            [0.3, 0.5],
+            [0.7, -0.6],
+        ],
+        dtype=float,
+    )
+    scores = np.array([0.1, 0.5, 0.9, 0.2], dtype=float)
+
+    first = _generate_evolution_points(
+        parents,
+        scores,
+        n_new=5,
+        strategy="current-to-best1bin",
+        bounds_lower=np.array([-1.0, -1.0]),
+        bounds_upper=np.array([1.0, 1.0]),
+        de_factor=0.8,
+        de_crossover=0.7,
+        rng=np.random.default_rng(789),
+    )
+    second = _generate_evolution_points(
+        parents,
+        scores,
+        n_new=5,
+        strategy="current-to-best1bin",
+        bounds_lower=np.array([-1.0, -1.0]),
+        bounds_upper=np.array([1.0, 1.0]),
+        de_factor=0.8,
+        de_crossover=0.7,
+        rng=np.random.default_rng(789),
+    )
+
+    assert np.allclose(first, second)
+
+
+def test_generate_evolution_points_forced_crossover_dimension_changes_base_parent():
+    parents = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 1.0],
+        ],
+        dtype=float,
+    )
+    scores = np.array([0.0, 0.1, 0.2, 0.3], dtype=float)
+    base_index_for_seed = int(np.random.default_rng(5).integers(0, parents.shape[0]))
+
+    generated = _generate_evolution_points(
+        parents,
+        scores,
+        n_new=1,
+        strategy="rand1bin",
+        bounds_lower=np.array([-2.0, -2.0]),
+        bounds_upper=np.array([2.0, 2.0]),
+        de_factor=1.0,
+        de_crossover=0.0,
+        rng=np.random.default_rng(5),
+    )
+
+    assert not np.allclose(generated[0], parents[base_index_for_seed])
 
 
 def test_single_result_fields_are_numpy_friendly():
