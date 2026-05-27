@@ -140,6 +140,24 @@ def test_smco_evo_is_reproducible_with_same_seed():
     assert np.allclose(first.summary["endpoints"], second.summary["endpoints"])
 
 
+def test_smco_evo_optimizes_concave_quadratic_near_origin():
+    result = smco_evo(
+        lambda x: -float(np.sum(x**2)),
+        [-5.0, -5.0],
+        [5.0, 5.0],
+        n_starts=10,
+        iter_max=100,
+        evolution_points=(0.5, 0.75),
+        elimination_rate=0.25,
+        seed=123,
+        tol_conv=1e-12,
+    )
+
+    assert result.best_result.f_optimal > -0.2
+    assert np.linalg.norm(result.best_result.x_optimal) < 0.6
+    assert len(result.summary["evolution_history"]) == 2
+
+
 def test_smco_r_evo_runs_refine_search_and_records_evolution_metadata():
     result = smco_r_evo(
         lambda x: -float(np.sum((x - 0.25) ** 2)),

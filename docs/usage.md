@@ -35,6 +35,28 @@ from comparison import ...     # 对比优化算法
 | `smco.smco_r()` | 精修版：两阶段搜索（常规 + refine） |
 | `smco.smco_br()` | 增强版：比较 regular 与 boosted 两条路径，取更优者 |
 
+### Evolutionary Multi-Start Variants
+
+`smco_evo()`、`smco_r_evo()` 和 `smco_br_evo()` 在原始 multi-start SMCO 流程上增加了群体级的淘汰与再生。在预设的迭代进度点，算法会按 `f_runmax` 淘汰表现最差的轨迹，保留者继续沿用各自内部 SMCO 状态，替换轨迹则由 differential evolution 或 Sobol 生成的新点重新初始化。
+
+```python
+from smco import smco_evo
+
+result = smco_evo(
+    objective,
+    bounds_lower=[-5, -5],
+    bounds_upper=[5, 5],
+    n_starts=8,
+    iter_max=200,
+    evolution_points=(0.5, 0.75),
+    elimination_rate=0.25,
+    evolution_strategy="rand1bin",
+    seed=123,
+)
+```
+
+支持的 `evolution_strategy` 取值为 `"rand1bin"`（默认）、`"current-to-best1bin"`、`"best1bin"` 和 `"sobol"`。
+
 ### 快速上手
 
 ```python
