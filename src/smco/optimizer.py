@@ -265,6 +265,43 @@ DEFAULT_CONTROL: dict[str, Any] = {
 }
 
 
+EVOLUTION_STRATEGIES = {"rand1bin", "current-to-best1bin", "best1bin", "sobol"}
+
+
+def _normalize_evolution_points(value: Any) -> tuple[float, ...]:
+    points = tuple(float(point) for point in value)
+    if not points:
+        raise ValueError("evolution_points must not be empty")
+    if any((not math.isfinite(point)) or point <= 0.0 or point >= 1.0 for point in points):
+        raise ValueError("evolution_points must contain values between 0 and 1")
+    if tuple(sorted(points)) != points or len(set(points)) != len(points):
+        raise ValueError("evolution_points must be strictly increasing")
+    return points
+
+
+def _validate_evolution_control(
+    evolution_points: Any,
+    elimination_rate: Any,
+    evolution_strategy: str,
+    de_factor: Any,
+    de_crossover: Any,
+) -> tuple[tuple[float, ...], float, str, float, float]:
+    points = _normalize_evolution_points(evolution_points)
+    rate = float(elimination_rate)
+    if not math.isfinite(rate) or rate <= 0.0 or rate >= 1.0:
+        raise ValueError("elimination_rate must be between 0 and 1")
+    strategy = str(evolution_strategy)
+    if strategy not in EVOLUTION_STRATEGIES:
+        raise ValueError("evolution_strategy must be one of current-to-best1bin, rand1bin, best1bin, sobol")
+    factor = float(de_factor)
+    if not math.isfinite(factor) or factor <= 0.0:
+        raise ValueError("de_factor must be positive")
+    crossover = float(de_crossover)
+    if not math.isfinite(crossover) or crossover < 0.0 or crossover > 1.0:
+        raise ValueError("de_crossover must be between 0 and 1")
+    return points, rate, strategy, factor, crossover
+
+
 def _merge_control(user_control: dict[str, Any] | None) -> dict[str, Any]:
     control = dict(DEFAULT_CONTROL)
     if user_control:
@@ -651,6 +688,69 @@ def smco_br(
     **kwargs: Any,
 ) -> SMCOResult:
     control = dict(kwargs)
+    control["refine_search"] = True
+    control["iter_boost"] = iter_boost
+    control.setdefault("refine_ratio", 0.5)
+    return smco_multi(f, bounds_lower, bounds_upper, start_points, control)
+
+
+def smco_evo(
+    f: Objective,
+    bounds_lower: Any,
+    bounds_upper: Any,
+    start_points: Any = None,
+    **kwargs: Any,
+) -> SMCOResult:
+    control = dict(kwargs)
+    _validate_evolution_control(
+        control.pop("evolution_points", (0.5, 0.75)),
+        control.pop("elimination_rate", 0.25),
+        control.pop("evolution_strategy", "rand1bin"),
+        control.pop("de_factor", 0.8),
+        control.pop("de_crossover", 0.7),
+    )
+    control["refine_search"] = False
+    control["iter_boost"] = 0
+    return smco_multi(f, bounds_lower, bounds_upper, start_points, control)
+
+
+def smco_r_evo(
+    f: Objective,
+    bounds_lower: Any,
+    bounds_upper: Any,
+    start_points: Any = None,
+    **kwargs: Any,
+) -> SMCOResult:
+    control = dict(kwargs)
+    _validate_evolution_control(
+        control.pop("evolution_points", (0.5, 0.75)),
+        control.pop("elimination_rate", 0.25),
+        control.pop("evolution_strategy", "rand1bin"),
+        control.pop("de_factor", 0.8),
+        control.pop("de_crossover", 0.7),
+    )
+    control["refine_search"] = True
+    control["iter_boost"] = 0
+    control.setdefault("refine_ratio", 0.5)
+    return smco_multi(f, bounds_lower, bounds_upper, start_points, control)
+
+
+def smco_br_evo(
+    f: Objective,
+    bounds_lower: Any,
+    bounds_upper: Any,
+    start_points: Any = None,
+    iter_boost: int = 1000,
+    **kwargs: Any,
+) -> SMCOResult:
+    control = dict(kwargs)
+    _validate_evolution_control(
+        control.pop("evolution_points", (0.5, 0.75)),
+        control.pop("elimination_rate", 0.25),
+        control.pop("evolution_strategy", "rand1bin"),
+        control.pop("de_factor", 0.8),
+        control.pop("de_crossover", 0.7),
+    )
     control["refine_search"] = True
     control["iter_boost"] = iter_boost
     control.setdefault("refine_ratio", 0.5)

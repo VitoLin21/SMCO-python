@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 from smco import SMCOResult, SingleResult, smco, smco_br, smco_hb, smco_multi, smco_r
+from smco import smco_br_evo, smco_evo, smco_r_evo
 from smco.optimizer import _split_refine_iterations
 
 
@@ -10,6 +11,38 @@ def test_public_api_exports_expected_symbols():
     assert callable(smco_br)
     assert callable(smco_multi)
     assert callable(smco_hb)
+
+
+def test_public_api_exports_evolutionary_smco_variants():
+    assert callable(smco_evo)
+    assert callable(smco_r_evo)
+    assert callable(smco_br_evo)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"evolution_points": [0.0]}, "evolution_points"),
+        ({"evolution_points": [1.0]}, "evolution_points"),
+        ({"evolution_points": [0.75, 0.5]}, "evolution_points"),
+        ({"elimination_rate": 0.0}, "elimination_rate"),
+        ({"elimination_rate": 1.0}, "elimination_rate"),
+        ({"evolution_strategy": "rand2bin"}, "evolution_strategy"),
+        ({"de_factor": 0.0}, "de_factor"),
+        ({"de_crossover": 1.5}, "de_crossover"),
+    ],
+)
+def test_smco_evo_rejects_invalid_evolution_controls(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        smco_evo(
+            lambda x: -float(x[0] ** 2),
+            [-1.0],
+            [1.0],
+            n_starts=4,
+            iter_max=8,
+            seed=123,
+            **kwargs,
+        )
 
 
 def test_single_result_fields_are_numpy_friendly():
