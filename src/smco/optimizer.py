@@ -269,7 +269,10 @@ EVOLUTION_STRATEGIES = {"rand1bin", "current-to-best1bin", "best1bin", "sobol"}
 
 
 def _normalize_evolution_points(value: Any) -> tuple[float, ...]:
-    points = tuple(float(point) for point in value)
+    try:
+        points = tuple(float(point) for point in value)
+    except (TypeError, ValueError):
+        raise ValueError("evolution_points must contain numeric values") from None
     if not points:
         raise ValueError("evolution_points must not be empty")
     if any((not math.isfinite(point)) or point <= 0.0 or point >= 1.0 for point in points):
@@ -277,6 +280,14 @@ def _normalize_evolution_points(value: Any) -> tuple[float, ...]:
     if tuple(sorted(points)) != points or len(set(points)) != len(points):
         raise ValueError("evolution_points must be strictly increasing")
     return points
+
+
+def _as_evolution_float(name: str, value: Any) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be numeric") from None
+    return number
 
 
 def _validate_evolution_control(
@@ -287,16 +298,16 @@ def _validate_evolution_control(
     de_crossover: Any,
 ) -> tuple[tuple[float, ...], float, str, float, float]:
     points = _normalize_evolution_points(evolution_points)
-    rate = float(elimination_rate)
+    rate = _as_evolution_float("elimination_rate", elimination_rate)
     if not math.isfinite(rate) or rate <= 0.0 or rate >= 1.0:
         raise ValueError("elimination_rate must be between 0 and 1")
     strategy = str(evolution_strategy)
     if strategy not in EVOLUTION_STRATEGIES:
         raise ValueError("evolution_strategy must be one of current-to-best1bin, rand1bin, best1bin, sobol")
-    factor = float(de_factor)
+    factor = _as_evolution_float("de_factor", de_factor)
     if not math.isfinite(factor) or factor <= 0.0:
         raise ValueError("de_factor must be positive")
-    crossover = float(de_crossover)
+    crossover = _as_evolution_float("de_crossover", de_crossover)
     if not math.isfinite(crossover) or crossover < 0.0 or crossover > 1.0:
         raise ValueError("de_crossover must be between 0 and 1")
     return points, rate, strategy, factor, crossover

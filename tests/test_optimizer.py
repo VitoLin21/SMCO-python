@@ -45,6 +45,54 @@ def test_smco_evo_rejects_invalid_evolution_controls(kwargs, message):
         )
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"evolution_points": None}, "evolution_points"),
+        ({"elimination_rate": None}, "elimination_rate"),
+        ({"de_factor": "bad"}, "de_factor"),
+        ({"de_crossover": None}, "de_crossover"),
+    ],
+)
+def test_smco_evo_rejects_bad_typed_evolution_controls_cleanly(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        smco_evo(
+            lambda x: -float(x[0] ** 2),
+            [-1.0],
+            [1.0],
+            n_starts=4,
+            iter_max=8,
+            seed=123,
+            **kwargs,
+        )
+
+
+def test_smco_r_evo_uses_shared_evolution_control_validation():
+    with pytest.raises(ValueError, match="elimination_rate"):
+        smco_r_evo(
+            lambda x: -float(x[0] ** 2),
+            [-1.0],
+            [1.0],
+            n_starts=4,
+            iter_max=8,
+            seed=123,
+            elimination_rate=None,
+        )
+
+
+def test_smco_br_evo_uses_shared_evolution_control_validation():
+    with pytest.raises(ValueError, match="de_crossover"):
+        smco_br_evo(
+            lambda x: -float(x[0] ** 2),
+            [-1.0],
+            [1.0],
+            n_starts=4,
+            iter_max=8,
+            seed=123,
+            de_crossover=None,
+        )
+
+
 def test_single_result_fields_are_numpy_friendly():
     result = SingleResult(
         x_optimal=np.array([1.0, 2.0]),
