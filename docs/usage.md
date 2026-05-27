@@ -37,7 +37,7 @@ from comparison import ...     # 对比优化算法
 
 ### Evolutionary Multi-Start Variants
 
-`smco_evo()`、`smco_r_evo()` 和 `smco_br_evo()` 在原始 multi-start SMCO 流程上增加了群体级的淘汰与再生。在预设的迭代进度点，算法会按 `f_runmax` 淘汰表现最差的轨迹，保留者继续沿用各自内部 SMCO 状态，替换轨迹则由 differential evolution 或 Sobol 生成的新点重新初始化。
+`smco_evo()`、`smco_r_evo()` 和 `smco_br_evo()` 在原始 multi-start SMCO 流程上增加了群体级的淘汰与再生。在预设的迭代进度点，算法默认按 `f_runmax` 淘汰表现最差的轨迹；若 `use_runmax=False`，则回退到按当前点 `f_current` 排序。保留者继续沿用各自内部 SMCO 状态，替换轨迹则由 differential evolution 或 Sobol 生成的新点重新初始化。
 
 ```python
 from smco import smco_evo
@@ -149,7 +149,7 @@ class SMCOResult:
 class SingleResult:
     x_optimal: np.ndarray           # 最优点
     f_optimal: float                # 最优目标值
-    iterations: int                 # 实际迭代次数
+    iterations: int                 # 迭代计数；evolutionary 变体按全局进度口径归一化
     x_runmax: np.ndarray | None     # 运行最优点（use_runmax=True 时）
     f_runmax: float | None          # 运行最优值
 ```
@@ -159,7 +159,7 @@ class SingleResult:
 ```python
 result.summary = {
     "n_starts": 5,
-    "mean_iterations": 487.2,
+    "mean_iterations": 487.2,      # evolutionary 变体同样按全局进度口径归一化
     "std_values": 0.003,           # 各起点目标值标准差
     "endpoints": np.ndarray,       # 各起点最优点组成的矩阵
     "values": np.ndarray,          # 各起点最优值数组

@@ -625,17 +625,6 @@ def _clip_result_to_bounds(
             result.f_runmax = float(f(checked_runmax.x_in))
 
 
-def _sync_state_from_clipped_result(
-    state: SMCOState,
-    result: SingleResult,
-) -> None:
-    state.x_current = np.array(result.x_optimal, dtype=float, copy=True)
-    state.f_current = float(result.f_optimal)
-    state.s_value = state.x_current * state.current_n
-    state.x_runmax = None if result.x_runmax is None else np.array(result.x_runmax, dtype=float, copy=True)
-    state.f_runmax = None if result.f_runmax is None else float(result.f_runmax)
-
-
 def _promote_runmax(result: SingleResult) -> None:
     # 若 runmax 更优，则提升为最终最优解（与 use_runmax 语义一致）。
     if (
@@ -956,9 +945,6 @@ def _run_evolutionary_states(
                 bool(control["use_runmax"]),
                 rng,
             )
-            state_result = state.to_result()
-            _clip_result_to_bounds(state_result, f, bounds_lower, bounds_upper)
-            _sync_state_from_clipped_result(state, state_result)
 
         ranked = sorted(states, key=lambda state: state.ranking_value(), reverse=True)
         n_eliminate = min(len(ranked) - 1, max(1, int(math.ceil(len(ranked) * elimination_rate))))

@@ -365,6 +365,75 @@ def test_run_evolutionary_states_caps_replacement_budget_to_remaining_global_bou
     assert calls[4:] == [(0, 8), (0, 8), (4, 4), (4, 4)]
 
 
+def test_run_evolutionary_states_preserves_survivor_internal_state_across_boundary(monkeypatch):
+    boundary_calls: list[tuple[float, float, int]] = []
+
+    def fake_run_state_until(
+        state,
+        f,
+        bounds_lower,
+        bounds_upper,
+        bounds_buffer,
+        buffer_rand,
+        iter_target,
+        tol_conv,
+        partial_option,
+        use_runmax,
+        rng,
+    ):
+        boundary_calls.append((float(state.x_current[0]), float(state.s_value[0]), int(iter_target)))
+        if state.birth_iteration == 0 and int(iter_target) == 4:
+            if state.x_current[0] > 0.5:
+                state.x_current = np.array([1.5], dtype=float)
+                state.f_current = 1.5
+                state.s_value = np.array([123.0], dtype=float)
+            else:
+                state.x_current = np.array([0.25], dtype=float)
+                state.f_current = 0.25
+                state.s_value = np.array([7.0], dtype=float)
+            state.current_n = int(state.initial_n) + int(iter_target) + 1
+            state.iterations = state.current_n - 1 - int(state.iter_boost)
+            state.stopped_target_n = int(state.initial_n) + int(iter_target)
+            return
+
+        state.current_n = int(state.initial_n) + int(iter_target) + 1
+        state.iterations = state.current_n - 1 - int(state.iter_boost)
+        state.stopped_target_n = int(state.initial_n) + int(iter_target)
+
+    monkeypatch.setattr("smco.optimizer._run_smco_state_until", fake_run_state_until)
+    monkeypatch.setattr(
+        "smco.optimizer._generate_evolution_points",
+        lambda *args, **kwargs: np.array([[0.1]], dtype=float),
+    )
+
+    _run_evolutionary_states(
+        lambda x: float(x[0]),
+        np.array([0.0]),
+        np.array([1.0]),
+        np.array([[1.0], [0.0]], dtype=float),
+        {
+            "iter_nstart": 1,
+            "bounds_buffer": 0.5,
+            "buffer_rand": False,
+            "tol_conv": 1e-12,
+            "partial_option": "center",
+            "use_runmax": False,
+        },
+        evolution_points=(0.5,),
+        elimination_rate=0.5,
+        evolution_strategy="sobol",
+        de_factor=0.8,
+        de_crossover=0.7,
+        iter_max=8,
+        iter_boost=0,
+        rng=np.random.default_rng(123),
+    )
+
+    # The survivor's second-stage call should see the same accumulated state
+    # from the first stage, not a clipped-and-rebuilt `s_value`.
+    assert boundary_calls[2] == (1.5, 123.0, 8)
+
+
 def test_smco_evo_use_runmax_promotes_public_best_result():
     objective = lambda x: float(np.sin(10.0 * x[0]) - 0.1 * x[0] ** 2)
 
