@@ -25,6 +25,40 @@ class PartialSignResult:
     x_partial_best: np.ndarray
 
 
+@dataclass
+class SMCOState:
+    x_current: np.ndarray
+    f_current: float
+    s_value: np.ndarray
+    current_n: int
+    iter_boost: int
+    x_runmax: np.ndarray | None
+    f_runmax: float | None
+    iterations: int = 0
+    initial_n: int = 0
+
+    def ranking_value(self) -> float:
+        if self.f_runmax is not None:
+            return float(self.f_runmax)
+        return float(self.f_current)
+
+    def ranking_point(self) -> np.ndarray:
+        if self.x_runmax is not None:
+            return np.array(self.x_runmax, dtype=float, copy=True)
+        return np.array(self.x_current, dtype=float, copy=True)
+
+    def to_result(self) -> SingleResult:
+        x_optimal = self.ranking_point()
+        f_optimal = self.ranking_value()
+        return SingleResult(
+            x_optimal=x_optimal,
+            f_optimal=f_optimal,
+            iterations=int(self.iterations),
+            x_runmax=None if self.x_runmax is None else np.array(self.x_runmax, dtype=float, copy=True),
+            f_runmax=None if self.f_runmax is None else float(self.f_runmax),
+        )
+
+
 def _as_1d_float_array(name: str, values: Any) -> np.ndarray:
     array = np.asarray(values, dtype=float)
     if array.ndim != 1:
@@ -326,6 +360,101 @@ def _split_refine_iterations(iter_max: int, ratio: float, refine_search: bool) -
     return int(round(iter_max * (1.0 - ratio))), int(round(iter_max * ratio))
 
 
+def _initialize_smco_state(
+    f: Objective,
+    bounds_lower: np.ndarray,
+    bounds_upper: np.ndarray,
+    start_point: np.ndarray,
+    *,
+    bounds_buffer: float,
+    buffer_rand: bool,
+    iter_nstart: int,
+    iter_boost: int,
+    use_runmax: bool,
+) -> SMCOState:
+    x_current = np.array(start_point, dtype=float, copy=True)
+    f_current = float(f(x_current))
+    n_boost_1 = int(iter_boost) + int(iter_nstart)
+    x_runmax = np.array(x_current, copy=True) if use_runmax else None
+    f_runmax = float(f_current) if use_runmax else None
+    return SMCOState(
+        x_current=x_current,
+        f_current=f_current,
+        s_value=x_current * n_boost_1,
+        current_n=n_boost_1,
+        iter_boost=int(iter_boost),
+        x_runmax=x_runmax,
+        f_runmax=f_runmax,
+        iterations=0,
+        initial_n=n_boost_1,
+    )
+
+
+def _run_smco_state_until(
+    state: SMCOState,
+    f: Objective,
+    bounds_lower: np.ndarray,
+    bounds_upper: np.ndarray,
+    bounds_buffer: float,
+    buffer_rand: bool,
+    iter_target: int,
+    tol_conv: float,
+    partial_option: str,
+    use_runmax: bool,
+    rng: np.random.Generator,
+) -> None:
+    bounds_diff = bounds_upper - bounds_lower
+    fixed_pushout = float(bounds_buffer) * bounds_diff
+    fixed_upper_out = bounds_upper + fixed_pushout
+    fixed_lower_out = bounds_lower - fixed_pushout
+    initial_n = int(state.initial_n or state.current_n)
+    target_n = initial_n + int(iter_target)
+    iter_min_check = initial_n + int(math.ceil(iter_target / 2))
+
+    while state.current_n <= target_n:
+        n = state.current_n
+        h_step = bounds_diff / (n + 1)
+        partial = compute_partial_signs(
+            f,
+            state.x_current,
+            state.f_current,
+            h_step,
+            bounds_lower,
+            bounds_upper,
+            partial_option,
+            use_runmax,
+        )
+        if buffer_rand:
+            pushout = float(bounds_buffer) * bounds_diff * rng.uniform(-1.0, 1.0, size=bounds_diff.size)
+            bounds_upper_out = bounds_upper + pushout
+            bounds_lower_out = bounds_lower - pushout
+        else:
+            bounds_upper_out = fixed_upper_out
+            bounds_lower_out = fixed_lower_out
+
+        z_value = partial.signs * bounds_upper_out + (1.0 - partial.signs) * bounds_lower_out
+        state.s_value = state.s_value + z_value
+        x_next = state.s_value / (n + 1)
+        f_next = float(f(x_next))
+
+        if use_runmax:
+            f_next_best = max(partial.f_partial_best, f_next)
+            if state.f_runmax is None or f_next_best > state.f_runmax:
+                state.f_runmax = float(f_next_best)
+                state.x_runmax = np.array(
+                    partial.x_partial_best if partial.f_partial_best > f_next else x_next,
+                    copy=True,
+                )
+
+        f_prev = state.f_current
+        state.f_current = f_next
+        state.x_current = x_next
+        state.current_n = n + 1
+        state.iterations = int(n - state.iter_boost)
+        if n >= iter_min_check and abs(state.f_current - f_prev) < tol_conv:
+            break
+
+
 def _single(
     f: Objective,
     bounds_lower: np.ndarray,
@@ -342,84 +471,31 @@ def _single(
     use_runmax: bool,
     rng: np.random.Generator,
 ) -> SingleResult:
-    # 单起点 SMCO 主循环：维护当前点、运行最优(runmax)及累计平均状态。
-    x_current = np.array(start_point, dtype=float, copy=True)
-    f_current = float(f(x_current))
-    f_runmax = f_current
-    x_runmax = np.array(x_current, copy=True)
-
-    bounds_diff = bounds_upper - bounds_lower
-    n_boost_1 = int(iter_boost) + int(iter_nstart)
-    n_boost_max = n_boost_1 + int(iter_max)
-    s_value = x_current * n_boost_1
-
-    if not buffer_rand:
-        # 与上游 R 一致：先把边界向外推，迭代中允许临时越界取样，最终再裁剪回原边界。
-        fixed_pushout = float(bounds_buffer) * bounds_diff
-        fixed_upper_out = bounds_upper + fixed_pushout
-        fixed_lower_out = bounds_lower - fixed_pushout
-
-    iter_min_check = n_boost_1 + int(math.ceil(iter_max / 2))
-    last_n = n_boost_1
-
-    for n in range(n_boost_1, n_boost_max + 1):
-        last_n = n
-        h_step = bounds_diff / (n + 1)
-        partial = compute_partial_signs(
-            f,
-            x_current,
-            f_current,
-            h_step,
-            bounds_lower,
-            bounds_upper,
-            partial_option,
-            use_runmax,
-        )
-
-        if buffer_rand:
-            # 随机缓冲：每轮对推边界加入随机扰动，提高探索多样性。
-            pushout = float(bounds_buffer) * bounds_diff * rng.uniform(
-                -1.0,
-                1.0,
-                size=bounds_diff.size,
-            )
-            bounds_upper_out = bounds_upper + pushout
-            bounds_lower_out = bounds_lower - pushout
-        else:
-            bounds_upper_out = fixed_upper_out
-            bounds_lower_out = fixed_lower_out
-
-        z_value = partial.signs * bounds_upper_out + (1.0 - partial.signs) * bounds_lower_out
-        s_value = s_value + z_value
-        # 递推平均，与 R 版的 S/(n+1) 更新形式保持一致。
-        x_next = s_value / (n + 1)
-        f_next = float(f(x_next))
-
-        if use_runmax:
-            f_next_best = max(partial.f_partial_best, f_next)
-            if f_next_best > f_runmax:
-                f_runmax = float(f_next_best)
-                x_runmax = np.array(
-                    partial.x_partial_best if partial.f_partial_best > f_next else x_next,
-                    copy=True,
-                )
-
-        f_prev = f_current
-        f_current = f_next
-        x_current = x_next
-
-        if n >= iter_min_check and abs(f_current - f_prev) < tol_conv:
-            break
-
-    result = SingleResult(
-        x_optimal=np.array(x_current, copy=True),
-        f_optimal=float(f_current),
-        iterations=int(last_n - iter_boost),
+    state = _initialize_smco_state(
+        f,
+        bounds_lower,
+        bounds_upper,
+        start_point,
+        bounds_buffer=bounds_buffer,
+        buffer_rand=buffer_rand,
+        iter_nstart=iter_nstart,
+        iter_boost=iter_boost,
+        use_runmax=use_runmax,
     )
-    if use_runmax:
-        result.x_runmax = np.array(x_runmax, copy=True)
-        result.f_runmax = float(f_runmax)
-    return result
+    _run_smco_state_until(
+        state,
+        f,
+        bounds_lower,
+        bounds_upper,
+        bounds_buffer,
+        buffer_rand,
+        iter_max,
+        tol_conv,
+        partial_option,
+        use_runmax,
+        rng,
+    )
+    return state.to_result()
 
 
 def _clip_result_to_bounds(

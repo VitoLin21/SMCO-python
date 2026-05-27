@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from smco import SMCOResult, SingleResult, smco, smco_br, smco_hb, smco_multi, smco_r
 from smco import smco_br_evo, smco_evo, smco_r_evo
-from smco.optimizer import _split_refine_iterations
+from smco.optimizer import _initialize_smco_state, _run_smco_state_until, _split_refine_iterations
 
 
 def test_public_api_exports_expected_symbols():
@@ -160,6 +160,82 @@ def test_smco_basic_returns_points_inside_bounds():
     x = result.best_result.x_optimal
     assert x.shape == (1,)
     assert -1.0 <= x[0] <= 1.0
+
+
+def test_stateful_smco_runner_matches_single_stage_result_without_evolution():
+    def objective(x):
+        return -float((x[0] - 0.2) ** 2)
+
+    lower = np.array([-1.0])
+    upper = np.array([1.0])
+    rng = np.random.default_rng(123)
+    state = _initialize_smco_state(
+        objective,
+        lower,
+        upper,
+        np.array([0.8]),
+        bounds_buffer=0.05,
+        buffer_rand=False,
+        iter_nstart=1,
+        iter_boost=0,
+        use_runmax=True,
+    )
+    _run_smco_state_until(
+        state,
+        objective,
+        lower,
+        upper,
+        bounds_buffer=0.05,
+        buffer_rand=False,
+        iter_target=40,
+        tol_conv=1e-12,
+        partial_option="center",
+        use_runmax=True,
+        rng=rng,
+    )
+    state_result = state.to_result()
+
+    full = smco(
+        objective,
+        lower,
+        upper,
+        start_points=[[0.8]],
+        iter_max=40,
+        n_starts=1,
+        iter_nstart=1,
+        seed=123,
+        tol_conv=1e-12,
+    ).best_result
+
+    assert np.allclose(state_result.x_optimal, full.x_optimal)
+    assert state_result.f_optimal == pytest.approx(full.f_optimal)
+    assert state_result.f_runmax == pytest.approx(full.f_runmax)
+
+
+def test_stateful_smco_runner_resumes_without_reinitializing_state():
+    def objective(x):
+        return -float((x[0] - 0.2) ** 2)
+
+    lower = np.array([-1.0])
+    upper = np.array([1.0])
+    rng = np.random.default_rng(123)
+    state = _initialize_smco_state(
+        objective,
+        lower,
+        upper,
+        np.array([0.8]),
+        bounds_buffer=0.05,
+        buffer_rand=False,
+        iter_nstart=1,
+        iter_boost=0,
+        use_runmax=True,
+    )
+    _run_smco_state_until(state, objective, lower, upper, 0.05, False, 20, 1e-12, "center", True, rng)
+    s_value_after_20 = np.array(state.s_value, copy=True)
+    _run_smco_state_until(state, objective, lower, upper, 0.05, False, 40, 1e-12, "center", True, rng)
+
+    assert state.current_n >= 40
+    assert not np.allclose(state.s_value, s_value_after_20)
 
 
 def test_smco_br_uses_boosted_search_and_returns_valid_structure():
