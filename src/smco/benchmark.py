@@ -5,7 +5,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-from .optimizer import smco, smco_br, smco_multi, smco_r
+from .optimizer import smco, smco_br, smco_br_evo, smco_evo, smco_multi, smco_r, smco_r_evo
 from .results import SMCOResult
 from .test_functions import BenchmarkConfig, assign_config
 
@@ -27,6 +27,9 @@ def _variant_function(variant: str) -> Callable[..., SMCOResult]:
         "smco": smco,
         "smco_r": smco_r,
         "smco_br": smco_br,
+        "smco_evo": smco_evo,
+        "smco_r_evo": smco_r_evo,
+        "smco_br_evo": smco_br_evo,
         "smco_multi": smco_multi,
     }
     try:

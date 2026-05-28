@@ -38,6 +38,22 @@ def test_run_benchmark_supports_all_variants():
         assert result.best_x.shape == (2,)
 
 
+def test_run_benchmark_supports_evo_variants():
+    for variant in ["smco_evo", "smco_r_evo", "smco_br_evo"]:
+        result = run_benchmark(
+            name="Minus Norm Squared",
+            dim=2,
+            variant=variant,
+            repetitions=1,
+            iter_max=30,
+            n_starts=5,
+            seed=22,
+        )
+
+        assert len(result.results) == 1
+        assert result.best_x.shape == (2,)
+
+
 def test_run_benchmark_normalizes_smco_multi_variant():
     result = run_benchmark(
         name="Minus Norm Squared",

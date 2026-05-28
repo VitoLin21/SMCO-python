@@ -1,0 +1,50 @@
+[
+  {
+    "label": "table2_Griewank_d200_min",
+    "name": "Griewank",
+    "dim": 200,
+    "maximize": false,
+    "n_replications": 10,
+    "best_opt": 0.12175609367856555,
+    "algo": "SMCO_EVO",
+    "time_avg": 35.0600342485006,
+    "rMSE": 0.47585630846060917,
+    "AE50": 0.47443761279282665,
+    "AE95": 0.5121290746080869,
+    "AE99": 0.5187306488981981,
+    "fopt_mean": 0.5969241856397265,
+    "fopt_sd": 0.02696727819142106
+  },
+  {
+    "label": "table2_Griewank_d200_min",
+    "name": "Griewank",
+    "dim": 200,
+    "maximize": false,
+    "n_replications": 10,
+    "best_opt": 0.12175609367856555,
+    "algo": "SMCO_R_EVO",
+    "time_avg": 35.36140186371049,
+    "rMSE": 0.02319411194106009,
+    "AE50": 0.021901213818268706,
+    "AE95": 0.03349227934617857,
+    "AE99": 0.03414420418779793,
+    "fopt_mean": 0.14271598965614243,
+    "fopt_sd": 0.010469510725253742
+  },
+  {
+    "label": "table2_Griewank_d200_min",
+    "name": "Griewank",
+    "dim": 200,
+    "maximize": false,
+    "n_replications": 10,
+    "best_opt": 0.12175609367856555,
+    "algo": "SMCO_BR_EVO",
+    "time_avg": 36.71480002220487,
+    "rMSE": 0.025292574997233887,
+    "AE50": 0.02394585370373592,
+    "AE95": 0.035195982992007886,
+    "AE99": 0.03785671695559896,
+    "fopt_mean": 0.1451671213691572,
+    "fopt_sd": 0.010090596968413051
+  }
+]

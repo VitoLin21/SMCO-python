@@ -332,3 +332,26 @@ class TestRunComparison:
         assert options["use_runmax"] is False
         assert options["seed"] == 99
         assert "n_starts" not in options
+
+    def test_smco_evo_variants_are_supported_in_comparison(self):
+        result = run_comparison(
+            name_config="Rastrigin",
+            dim_config=2,
+            to_maximize=True,
+            algo_names=["SMCO_EVO", "SMCO_R_EVO", "SMCO_BR_EVO"],
+            n_replications=2,
+            smco_options={"iter_max": 40, "n_starts": 4},
+            seed=42,
+        )
+        assert result.fopt_algo.shape == (3, 2)
+        assert set(result.sum_results) == {"SMCO_EVO", "SMCO_R_EVO", "SMCO_BR_EVO"}
+
+    def test_smco_br_evo_budget_adjustment_matches_br_comparison_rule(self):
+        options = _smco_variant_options(
+            "SMCO_BR_EVO",
+            {"iter_max": 101, "iter_boost": 11, "n_starts": 7},
+            algo_seed=99,
+        )
+        assert options["iter_max"] == 51
+        assert options["iter_boost"] == 11
+        assert options["seed"] == 99

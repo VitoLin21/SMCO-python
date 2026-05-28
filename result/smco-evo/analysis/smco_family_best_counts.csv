@@ -1,0 +1,13 @@
+source,algo,best_count,average_rank,rank_count
+paper_tables,SMCO,3,3.2,20
+paper_tables,SMCO_R,5,3.0833333333333335,24
+paper_tables,SMCO_BR,2,4.35,20
+paper_tables,SMCO_EVO,5,3.3333333333333335,24
+paper_tables,SMCO_R_EVO,7,2.3333333333333335,24
+paper_tables,SMCO_BR_EVO,2,4.125,24
+r_synced,SMCO,0,5.388888888888889,18
+r_synced,SMCO_R,3,2.7222222222222223,18
+r_synced,SMCO_BR,0,4.166666666666667,18
+r_synced,SMCO_EVO,1,4.277777777777778,18
+r_synced,SMCO_R_EVO,7,2.0555555555555554,18
+r_synced,SMCO_BR_EVO,7,2.388888888888889,18

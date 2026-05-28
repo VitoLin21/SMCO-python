@@ -1,0 +1,50 @@
+[
+  {
+    "label": "table2_Michalewicz_d200_min",
+    "name": "Michalewicz",
+    "dim": 200,
+    "maximize": false,
+    "n_replications": 10,
+    "best_opt": -185.31516157451824,
+    "algo": "SMCO_EVO",
+    "time_avg": 78.08297723930445,
+    "rMSE": 32.72653506329846,
+    "AE50": 32.81618567422149,
+    "AE95": 34.362889631372745,
+    "AE99": 34.99107218427795,
+    "fopt_mean": -152.60610393679698,
+    "fopt_sd": 1.1272610372705842
+  },
+  {
+    "label": "table2_Michalewicz_d200_min",
+    "name": "Michalewicz",
+    "dim": 200,
+    "maximize": false,
+    "n_replications": 10,
+    "best_opt": -185.31516157451824,
+    "algo": "SMCO_R_EVO",
+    "time_avg": 78.06697928619687,
+    "rMSE": 0.6716485711733862,
+    "AE50": 0.5223055414649167,
+    "AE95": 1.136941922848356,
+    "AE99": 1.3193906008771406,
+    "fopt_mean": -184.7552819165156,
+    "fopt_sd": 0.3910762524596488
+  },
+  {
+    "label": "table2_Michalewicz_d200_min",
+    "name": "Michalewicz",
+    "dim": 200,
+    "maximize": false,
+    "n_replications": 10,
+    "best_opt": -185.31516157451824,
+    "algo": "SMCO_BR_EVO",
+    "time_avg": 77.22082949390169,
+    "rMSE": 3.809835763808753,
+    "AE50": 3.968080741733786,
+    "AE95": 4.625345663408869,
+    "AE99": 4.7064787765750635,
+    "fopt_mean": -181.59464837257445,
+    "fopt_sd": 0.8645037506236222
+  }
+]

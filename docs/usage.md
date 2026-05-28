@@ -57,6 +57,93 @@ result = smco_evo(
 
 支持的 `evolution_strategy` 取值为 `"rand1bin"`（默认）、`"current-to-best1bin"`、`"best1bin"` 和 `"sobol"`。
 
+### SMCO-EVO 实验与报告工作流
+
+如果目标不是单次调用 API，而是复现实验并整理完整结果，当前仓库已经提供了配套脚本。
+
+#### 1. 跑论文 Table 1 / Table 2 的 SMCO-EVO 结果
+
+```bash
+.venv/bin/python scripts/run_paper_tables_with_evo.py \
+  --table12-evo \
+  --base-result-dir result/comparison \
+  --evo-result-dir result/comparison_evo \
+  --integrated-dir result/paper_tables_integrated_2026-05-27
+```
+
+输出：
+
+- `result/comparison_evo/`: 仅 SMCO-EVO 结果
+- `result/paper_tables_integrated_2026-05-27/`: SMCO + comparison methods + SMCO-EVO 的整合结果
+
+#### 2. 跑论文 Table 3 的 SMCO-EVO 结果
+
+```bash
+.venv/bin/python scripts/run_paper_tables_with_evo.py \
+  --table3 \
+  --table3-evo-only \
+  --table3-dir result/table3_2026-05-27 \
+  --cache-dir result/table3_cache
+```
+
+输出：
+
+- `result/table3_2026-05-27/`
+
+#### 3. 跑从 R 同步到 Python 的 benchmark 集
+
+```bash
+.venv/bin/python scripts/run_synced_r_benchmarks_with_evo.py \
+  --algo-set smco \
+  --out-dir result/r-synced-benchmarks-2026-05-28
+```
+
+输出：
+
+- `result/r-synced-benchmarks-2026-05-28/`
+- 每个 benchmark 一个子目录和局部 `report.md`
+- 根目录 `summary.csv` / `summary.json`
+
+#### 4. 跑四种进化策略 sweep
+
+支持四种 `evolution_strategy`：
+
+- `rand1bin`
+- `current-to-best1bin`
+- `best1bin`
+- `sobol`
+
+若要补跑缺失策略 case，可使用：
+
+```bash
+.venv/bin/python scripts/run_evo_strategy_sweep_serial.py
+```
+
+策略结果统一放在：
+
+- `result/evo_strategy_sweep/<strategy>/paper_tables_integrated/`
+- `result/evo_strategy_sweep/<strategy>/table3/`
+- `result/evo_strategy_sweep/<strategy>/r_synced/`
+
+#### 5. 打包最终目录并生成总报告
+
+```bash
+.venv/bin/python scripts/package_smco_evo_results.py
+```
+
+最终产物：
+
+- `result/smco-evo/report.md`
+- `result/smco-evo/analysis/*.csv`
+- `result/smco-evo/source/`
+
+当前这套打包结果已经覆盖：
+
+- 直接 `smco` vs `smco-evo`
+- 论文 `Table 1 / Table 2 / Table 3`
+- R-synced 18 个 benchmark
+- 四种进化策略 `rand1bin / current-to-best1bin / best1bin / sobol`
+
 ### 快速上手
 
 ```python
@@ -249,6 +336,27 @@ smco_hb(
 - `brackets`
 - `trajectory`
 - `metadata`
+
+---
+
+## 结果目录约定
+
+当前仓库里和 SMCO-EVO 相关的关键目录如下：
+
+| 路径 | 含义 |
+|------|------|
+| `result/smco-evo-vs-smco-2026-05-27/` | 直接 `smco` vs `smco_evo` 对比 |
+| `result/paper_tables_integrated_2026-05-27/` | 论文 Table 1/2/3 的整合结果 |
+| `result/table3_2026-05-27/` | Table 3 的独立输出 |
+| `result/r-synced-benchmarks-2026-05-28/` | R 同步 benchmark 全量结果 |
+| `result/evo_strategy_sweep/` | 四种进化策略的分目录结果 |
+| `result/smco-evo/` | 最终汇总报告目录 |
+
+后续如果需要更新总报告，不要手工编辑 `result/smco-evo/report.md`，而是重跑：
+
+```bash
+.venv/bin/python scripts/package_smco_evo_results.py
+```
 
 ---
 

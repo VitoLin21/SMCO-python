@@ -1,0 +1,2 @@
+function,dim,sense,known_best_objective,smco_mean,evo_mean,smco_mean_time,evo_mean_time,evo_win_reps,smco_win_reps,tie_reps,smco_mean_gap,evo_mean_gap,gap_improvement,decision_basis,decision_metric,outcome
+Bukin6,2,min,-0.0,-0.2081842482997392,-0.22326445386911664,0.0557567953976104,0.05743430084257852,4,7,9,0.2081842482997392,0.22326445386911664,-0.015080205569377447,gap_improvement,-0.015080205569377447,smco_better

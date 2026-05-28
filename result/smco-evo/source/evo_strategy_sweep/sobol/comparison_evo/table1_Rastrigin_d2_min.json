@@ -1,0 +1,50 @@
+[
+  {
+    "label": "table1_Rastrigin_d2_min",
+    "name": "Rastrigin",
+    "dim": 2,
+    "maximize": false,
+    "n_replications": 500,
+    "best_opt": -7.105427357601002e-15,
+    "algo": "SMCO_EVO",
+    "time_avg": 0.02587347323645372,
+    "rMSE": 0.12587457462211077,
+    "AE50": 0.0002580370102869267,
+    "AE95": 0.004035857785761358,
+    "AE99": 0.9950234099420474,
+    "fopt_mean": 0.01668643927023443,
+    "fopt_sd": 0.12488869481555759
+  },
+  {
+    "label": "table1_Rastrigin_d2_min",
+    "name": "Rastrigin",
+    "dim": 2,
+    "maximize": false,
+    "n_replications": 500,
+    "best_opt": -7.105427357601002e-15,
+    "algo": "SMCO_R_EVO",
+    "time_avg": 0.02605408751021605,
+    "rMSE": 0.1604835680988773,
+    "AE50": 0.0007390328470950891,
+    "AE95": 0.0025220390916661727,
+    "AE99": 0.9953026061543514,
+    "fopt_mean": 0.026719917183882478,
+    "fopt_sd": 0.15840213653699864
+  },
+  {
+    "label": "table1_Rastrigin_d2_min",
+    "name": "Rastrigin",
+    "dim": 2,
+    "maximize": false,
+    "n_replications": 500,
+    "best_opt": -7.105427357601002e-15,
+    "algo": "SMCO_BR_EVO",
+    "time_avg": 0.026578494340064936,
+    "rMSE": 0.10906625660914025,
+    "AE50": 0.0012324226918511982,
+    "AE95": 0.0029415870286957357,
+    "AE99": 0.9950124013732737,
+    "fopt_mean": 0.013231884369714316,
+    "fopt_sd": 0.10836913543015413
+  }
+]

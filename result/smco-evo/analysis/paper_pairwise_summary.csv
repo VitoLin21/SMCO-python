@@ -1,0 +1,4 @@
+tag,source,base_algo,evo_algo,scenarios,wins,losses,ties,win_rate,mean_gap_improvement,median_gap_improvement
+paper_tables,paper_tables,SMCO,SMCO_EVO,20,8,11,1,0.4,1.0554906690411774,-0.00036999999999998145
+paper_tables,paper_tables,SMCO_BR,SMCO_BR_EVO,20,7,12,1,0.35,1.4158745116798008,-0.0008741253187079696
+paper_tables,paper_tables,SMCO_R,SMCO_R_EVO,24,14,9,1,0.5833333333333334,743.8014435690599,0.0004813194760338868

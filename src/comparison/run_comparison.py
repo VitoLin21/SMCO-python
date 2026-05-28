@@ -8,14 +8,22 @@ from typing import Any
 
 import numpy as np
 
-from smco.optimizer import smco, smco_br, smco_r
+from smco.optimizer import smco, smco_br, smco_br_evo, smco_evo, smco_r, smco_r_evo
 from smco.test_functions import assign_config
 
 from .domain_mod import modify_domain
 from .methods import METHOD_REGISTRY, get_method
 
 
-SMCO_VARIANTS = {"SMCO", "SMCO_R", "SMCO_BR"}
+SMCO_VARIANT_MAP = {
+    "SMCO": smco,
+    "SMCO_R": smco_r,
+    "SMCO_BR": smco_br,
+    "SMCO_EVO": smco_evo,
+    "SMCO_R_EVO": smco_r_evo,
+    "SMCO_BR_EVO": smco_br_evo,
+}
+SMCO_VARIANTS = set(SMCO_VARIANT_MAP)
 GLOBAL_METHODS = {"GenSA", "DEoptim", "GA", "PSO"}
 COMPARISON_SMCO_DEFAULTS: dict[str, Any] = {
     "iter_max": 300,
@@ -63,9 +71,13 @@ def _smco_variant_options(algo_name: str, smco_options: dict, algo_seed: int) ->
     options = dict(COMPARISON_SMCO_DEFAULTS)
     # n_starts 只用于生成共享起点，不应继续透传给 SMCO。
     options.update({key: value for key, value in smco_options.items() if key != "n_starts"})
-    if algo_name in ("SMCO_R", "SMCO_BR"):
+    # Evolution-only controls should not leak into non-evo wrappers.
+    if algo_name not in ("SMCO_EVO", "SMCO_R_EVO", "SMCO_BR_EVO"):
+        for key in ("evolution_strategy", "evolution_points", "elimination_rate", "de_factor", "de_crossover"):
+            options.pop(key, None)
+    if algo_name in ("SMCO_R", "SMCO_BR", "SMCO_R_EVO", "SMCO_BR_EVO"):
         options.setdefault("refine_ratio", 0.5)
-    if algo_name == "SMCO_BR":
+    if algo_name in ("SMCO_BR", "SMCO_BR_EVO"):
         base_iter_max = int(options["iter_max"])
         # SMCO-BR 会执行 regular 和 boosted 两次 refine；比较实验中将单次预算减半。
         options["iter_max"] = int(math.ceil(base_iter_max / 2.0))
@@ -125,8 +137,7 @@ def run_comparison(
 
             if algo_name in SMCO_VARIANTS:
                 # SMCO 变体必须走各自公开包装器，不能统一退化成 smco_multi。
-                variant_map = {"SMCO": smco, "SMCO_R": smco_r, "SMCO_BR": smco_br}
-                variant_fn = variant_map[algo_name]
+                variant_fn = SMCO_VARIANT_MAP[algo_name]
                 variant_options = _smco_variant_options(algo_name, smco_options, algo_seed)
                 smco_result = variant_fn(
                     f,

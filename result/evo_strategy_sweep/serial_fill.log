@@ -1,0 +1,5 @@
+[STRATEGY] current-to-best1bin
+  table12 missing: 8
+  table3 missing: 1
+  rsynced missing: 9
+[RUN] .venv/bin/python scripts/run_paper_tables_with_evo.py --table3 --table3-evo-only --evolution-strategy current-to-best1bin --table3-dir result/evo_strategy_sweep/current-to-best1bin/table3 --cache-dir result/table3_cache --only-labels table3_EmpiricalWelfare_d50

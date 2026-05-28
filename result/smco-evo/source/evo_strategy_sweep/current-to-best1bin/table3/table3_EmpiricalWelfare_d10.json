@@ -1,0 +1,50 @@
+[
+  {
+    "label": "table3_EmpiricalWelfare_d10",
+    "name": "EmpiricalWelfare",
+    "dim": 10,
+    "maximize": true,
+    "n_replications": 50,
+    "best_opt": 2182.497885720483,
+    "algo": "SMCO_EVO",
+    "time_avg": 1.5769156101776753,
+    "rMSE": 363.50717082522,
+    "AE50": 367.8675593624638,
+    "AE95": 520.9241651306514,
+    "AE99": 558.8848194730565,
+    "fopt_mean": 1836.8177350103017,
+    "fopt_sd": 113.58129627546246
+  },
+  {
+    "label": "table3_EmpiricalWelfare_d10",
+    "name": "EmpiricalWelfare",
+    "dim": 10,
+    "maximize": true,
+    "n_replications": 50,
+    "best_opt": 2182.497885720483,
+    "algo": "SMCO_R_EVO",
+    "time_avg": 1.587621446294943,
+    "rMSE": 363.11146167762615,
+    "AE50": 349.6094546243088,
+    "AE95": 525.8220318768296,
+    "AE99": 583.6248384473598,
+    "fopt_mean": 1843.0104304456263,
+    "fopt_sd": 130.14199981160502
+  },
+  {
+    "label": "table3_EmpiricalWelfare_d10",
+    "name": "EmpiricalWelfare",
+    "dim": 10,
+    "maximize": true,
+    "n_replications": 50,
+    "best_opt": 2182.497885720483,
+    "algo": "SMCO_BR_EVO",
+    "time_avg": 1.5899223782646004,
+    "rMSE": 383.063296402365,
+    "AE50": 353.12330586577036,
+    "AE95": 564.8852000433695,
+    "AE99": 593.4245223896779,
+    "fopt_mean": 1823.2619408001751,
+    "fopt_sd": 134.34278774934262
+  }
+]

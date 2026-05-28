@@ -1,0 +1,50 @@
+[
+  {
+    "label": "table3_MaximumScore_d10",
+    "name": "MaximumScore",
+    "dim": 10,
+    "maximize": true,
+    "n_replications": 50,
+    "best_opt": 0.468,
+    "algo": "SMCO_EVO",
+    "time_avg": 0.1374003334576264,
+    "rMSE": 0.04385247997548145,
+    "AE50": 0.03500000000000003,
+    "AE95": 0.07349999999999998,
+    "AE99": 0.08106000000000001,
+    "fopt_mean": 0.42943999999999993,
+    "fopt_sd": 0.02109662899854005
+  },
+  {
+    "label": "table3_MaximumScore_d10",
+    "name": "MaximumScore",
+    "dim": 10,
+    "maximize": true,
+    "n_replications": 50,
+    "best_opt": 0.468,
+    "algo": "SMCO_R_EVO",
+    "time_avg": 0.1401356141793076,
+    "rMSE": 0.04404906355417788,
+    "AE50": 0.03600000000000003,
+    "AE95": 0.0731,
+    "AE99": 0.07909999999999999,
+    "fopt_mean": 0.4292000000000001,
+    "fopt_sd": 0.021065495532762015
+  },
+  {
+    "label": "table3_MaximumScore_d10",
+    "name": "MaximumScore",
+    "dim": 10,
+    "maximize": true,
+    "n_replications": 50,
+    "best_opt": 0.468,
+    "algo": "SMCO_BR_EVO",
+    "time_avg": 0.1547887185611762,
+    "rMSE": 0.04701404045601699,
+    "AE50": 0.041000000000000036,
+    "AE95": 0.07529999999999999,
+    "AE99": 0.08717999999999998,
+    "fopt_mean": 0.42564,
+    "fopt_sd": 0.02060192184417438
+  }
+]
