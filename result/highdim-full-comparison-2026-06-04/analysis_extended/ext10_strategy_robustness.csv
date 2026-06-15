@@ -1,0 +1,13 @@
+strategy,pair,mean_improve,std_improve,cv,positive_rate,min_improve,max_improve,iqr,robustness
+rand1bin,SMCO_vs_SMCO_EVO,0.7829,1.2875,164.4,67.6,-0.214,3.5649,1.6507,medium
+rand1bin,SMCO_R_vs_SMCO_R_EVO,0.7061,1.0845,153.6,88.2,-0.0501,4.2362,0.9327,high
+rand1bin,SMCO_BR_vs_SMCO_BR_EVO,2.5398,5.0404,198.5,82.4,-0.0347,19.2001,1.2357,high
+current-to-best1bin,SMCO_vs_SMCO_EVO,0.7292,1.2274,168.3,61.8,-0.2127,3.4209,1.3423,medium
+current-to-best1bin,SMCO_R_vs_SMCO_R_EVO,0.636,0.947,148.9,79.4,-0.0492,4.0045,0.9116,medium
+current-to-best1bin,SMCO_BR_vs_SMCO_BR_EVO,1.9747,3.7955,192.2,79.4,-0.0504,16.0541,1.422,medium
+best1bin,SMCO_vs_SMCO_EVO,0.9375,1.3996,149.3,70.6,-0.2127,4.6026,1.933,medium
+best1bin,SMCO_R_vs_SMCO_R_EVO,0.9742,1.1792,121.0,85.3,-0.0492,4.0557,1.3673,high
+best1bin,SMCO_BR_vs_SMCO_BR_EVO,2.5928,4.4638,172.2,85.3,-0.0285,16.7062,1.7652,high
+sobol,SMCO_vs_SMCO_EVO,0.4811,0.8881,184.6,61.8,-0.2137,2.5304,0.67,medium
+sobol,SMCO_R_vs_SMCO_R_EVO,0.1195,0.3695,309.3,64.7,-0.1436,1.7428,0.0373,medium
+sobol,SMCO_BR_vs_SMCO_BR_EVO,0.0026,0.0537,2102.6,61.8,-0.1906,0.1103,0.0274,medium

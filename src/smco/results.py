@@ -13,6 +13,7 @@ class SingleResult:
     iterations: int
     x_runmax: np.ndarray | None = None
     f_runmax: float | None = None
+    runmax_history: np.ndarray | None = None
 
 
 @dataclass(eq=False)

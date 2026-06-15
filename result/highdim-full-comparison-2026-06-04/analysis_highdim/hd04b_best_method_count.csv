@@ -1,0 +1,15 @@
+strategy,algo,times_best,is_evo
+sobol,GenSA,10,False
+best1bin,GenSA,9,False
+current-to-best1bin,GenSA,9,False
+rand1bin,GenSA,9,False
+best1bin,SMCO_BR_EVO,5,True
+rand1bin,SMCO_BR_EVO,5,True
+current-to-best1bin,SMCO_BR_EVO,4,True
+sobol,SMCO_R_EVO,2,True
+sobol,SMCO_BR_EVO,2,True
+best1bin,SA,1,False
+current-to-best1bin,SMCO_R_EVO,1,True
+current-to-best1bin,SA,1,False
+rand1bin,SA,1,False
+sobol,SA,1,False

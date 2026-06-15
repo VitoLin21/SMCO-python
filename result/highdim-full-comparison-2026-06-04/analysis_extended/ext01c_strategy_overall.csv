@@ -1,0 +1,5 @@
+strategy,total_rank_sum,avg_rank,wins
+rand1bin,203,1.99,46
+current-to-best1bin,266,2.608,16
+best1bin,212,2.078,27
+sobol,339,3.324,13

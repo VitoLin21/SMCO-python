@@ -1,0 +1,13 @@
+strategy,pair,mean_improve_pct,median_improve_pct,max_improve_pct,min_improve_pct,mean_win_rate,positive_configs,total_configs,significant_count
+best1bin,SMCO_vs_SMCO_EVO,1.2005,0.0118,4.6026,-0.0272,65.8,11,15,0
+best1bin,SMCO_R_vs_SMCO_R_EVO,1.6449,1.8672,4.0557,-0.0,89.8,14,15,0
+best1bin,SMCO_BR_vs_SMCO_BR_EVO,4.4979,1.1669,16.7062,-0.0026,86.4,12,15,0
+current-to-best1bin,SMCO_vs_SMCO_EVO,0.826,0.0081,3.4209,-0.0272,61.1,10,15,0
+current-to-best1bin,SMCO_R_vs_SMCO_R_EVO,1.0866,0.9654,4.0045,-0.0126,77.6,13,15,0
+current-to-best1bin,SMCO_BR_vs_SMCO_BR_EVO,3.6506,1.0597,16.0541,-0.0026,80.2,12,15,0
+rand1bin,SMCO_vs_SMCO_EVO,0.8889,0.0073,3.5649,-0.0234,60.4,11,15,0
+rand1bin,SMCO_R_vs_SMCO_R_EVO,1.2152,0.7253,4.2362,-0.0051,83.3,13,15,0
+rand1bin,SMCO_BR_vs_SMCO_BR_EVO,4.8849,1.2228,19.2001,-0.0011,84.9,13,15,0
+sobol,SMCO_vs_SMCO_EVO,0.5467,0.005,2.5304,-0.0365,56.7,11,15,0
+sobol,SMCO_R_vs_SMCO_R_EVO,0.2685,0.0245,1.7428,-0.0103,72.9,12,15,0
+sobol,SMCO_BR_vs_SMCO_BR_EVO,0.0154,0.003,0.1103,-0.0498,57.1,11,15,0

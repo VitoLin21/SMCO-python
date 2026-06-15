@@ -1,0 +1,6 @@
+func,avg_improve,avg_win_rate,avg_positive_rate,best_pair
+Rastrigin,0.0027,51.3,61.1,SMCO_R_vs_SMCO_R_EVO
+Ackley,1.4657,95.5,98.1,SMCO_vs_SMCO_EVO
+Rosenbrock,2.2522,63.0,69.4,SMCO_BR_vs_SMCO_BR_EVO
+Griewank,0.0019,53.9,36.1,SMCO_BR_vs_SMCO_BR_EVO
+Zakharov,0.4649,69.3,87.5,SMCO_BR_vs_SMCO_BR_EVO

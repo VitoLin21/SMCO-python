@@ -1,0 +1,13 @@
+evo_algo,strategy,wins
+SMCO_EVO,rand1bin,16
+SMCO_EVO,current-to-best1bin,7
+SMCO_EVO,best1bin,6
+SMCO_EVO,sobol,5
+SMCO_R_EVO,rand1bin,16
+SMCO_R_EVO,current-to-best1bin,4
+SMCO_R_EVO,best1bin,10
+SMCO_R_EVO,sobol,4
+SMCO_BR_EVO,rand1bin,14
+SMCO_BR_EVO,current-to-best1bin,5
+SMCO_BR_EVO,best1bin,11
+SMCO_BR_EVO,sobol,4

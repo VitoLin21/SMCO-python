@@ -1,0 +1,16 @@
+evo_algo,func,best_strategy,wins,total_dims,avg_gap_pct
+SMCO_EVO,Rastrigin,current-to-best1bin,3,9,0.003
+SMCO_EVO,Ackley,rand1bin,8,9,0.9547
+SMCO_EVO,Rosenbrock,best1bin,3,9,0.6941
+SMCO_EVO,Griewank,rand1bin,2,3,0.0045
+SMCO_EVO,Zakharov,current-to-best1bin,2,4,0.37
+SMCO_R_EVO,Rastrigin,rand1bin,5,9,0.0017
+SMCO_R_EVO,Ackley,rand1bin,9,9,0.9251
+SMCO_R_EVO,Rosenbrock,best1bin,8,9,2.2124
+SMCO_R_EVO,Griewank,sobol,3,3,0.0123
+SMCO_R_EVO,Zakharov,current-to-best1bin,2,4,0.5701
+SMCO_BR_EVO,Rastrigin,sobol,3,9,0.0091
+SMCO_BR_EVO,Ackley,rand1bin,8,9,1.0301
+SMCO_BR_EVO,Rosenbrock,best1bin,6,9,9.0028
+SMCO_BR_EVO,Griewank,best1bin,2,3,0.0948
+SMCO_BR_EVO,Zakharov,best1bin,2,4,1.559

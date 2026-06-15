@@ -38,6 +38,7 @@ class SMCOState:
     initial_n: int = 0  # Fixed n_boost_1 anchor for absolute target boundaries.
     stopped_target_n: int | None = None
     birth_iteration: int = 0  # Global evolutionary boundary where this trajectory was created.
+    runmax_history: list[float] | None = None  # Per-iteration runmax tracking (None if disabled).
 
     def ranking_value(self) -> float:
         if self.f_runmax is not None:
@@ -50,12 +51,16 @@ class SMCOState:
         return np.array(self.x_current, dtype=float, copy=True)
 
     def to_result(self) -> SingleResult:
+        history = None
+        if self.runmax_history is not None:
+            history = np.array(self.runmax_history, dtype=float)
         return SingleResult(
             x_optimal=np.array(self.x_current, dtype=float, copy=True),
             f_optimal=float(self.f_current),
             iterations=int(self.iterations),
             x_runmax=None if self.x_runmax is None else np.array(self.x_runmax, dtype=float, copy=True),
             f_runmax=None if self.f_runmax is None else float(self.f_runmax),
+            runmax_history=history,
         )
 
 
@@ -296,6 +301,7 @@ DEFAULT_CONTROL: dict[str, Any] = {
     "use_parallel": False,
     "verbose": False,
     "seed": 123,
+    "record_history": False,
 }
 
 
@@ -479,12 +485,16 @@ def _initialize_smco_state(
     iter_boost: int,
     use_runmax: bool,
     birth_iteration: int = 0,
+    record_history: bool = False,
 ) -> SMCOState:
     x_current = np.array(start_point, dtype=float, copy=True)
     f_current = float(f(x_current))
     n_boost_1 = int(iter_boost) + int(iter_nstart)
     x_runmax = np.array(x_current, copy=True) if use_runmax else None
     f_runmax = float(f_current) if use_runmax else None
+    runmax_history: list[float] | None = None
+    if record_history and use_runmax:
+        runmax_history = [float(f_runmax if f_runmax is not None else f_current)]
     return SMCOState(
         x_current=x_current,
         f_current=f_current,
@@ -496,6 +506,7 @@ def _initialize_smco_state(
         iterations=0,
         initial_n=n_boost_1,
         birth_iteration=int(birth_iteration),
+        runmax_history=runmax_history,
     )
 
 
@@ -562,6 +573,8 @@ def _run_smco_state_until(
         state.x_current = x_next
         state.current_n = n + 1
         state.iterations = int(n - state.iter_boost)
+        if state.runmax_history is not None:
+            state.runmax_history.append(float(state.f_runmax if state.f_runmax is not None else state.f_current))
         if n >= iter_min_check and abs(state.f_current - f_prev) < tol_conv:
             state.stopped_target_n = target_n
             break
@@ -582,6 +595,7 @@ def _single(
     partial_option: str,
     use_runmax: bool,
     rng: np.random.Generator,
+    record_history: bool = False,
 ) -> SingleResult:
     state = _initialize_smco_state(
         f,
@@ -589,6 +603,7 @@ def _single(
         iter_nstart=iter_nstart,
         iter_boost=iter_boost,
         use_runmax=use_runmax,
+        record_history=record_history,
     )
     _run_smco_state_until(
         state,
@@ -662,6 +677,7 @@ def _single_refine(
     partial_option: str,
     use_runmax: bool,
     rng: np.random.Generator,
+    record_history: bool = False,
 ) -> SingleResult:
     # refine 模式分为两段：先常规搜索，再以第一段最优点做零缓冲精修。
     ratio = float(refine_ratio) if refine_search else 0.0
@@ -681,6 +697,7 @@ def _single_refine(
         partial_option=partial_option,
         use_runmax=use_runmax,
         rng=rng,
+        record_history=record_history,
     )
     _clip_result_to_bounds(result, f, bounds_lower, bounds_upper)
 
@@ -713,11 +730,14 @@ def _single_refine(
         partial_option=partial_option,
         use_runmax=use_runmax,
         rng=rng,
+        record_history=record_history,
     )
     _clip_result_to_bounds(refine_result, f, bounds_lower, bounds_upper)
 
     if use_runmax:
         _promote_runmax(refine_result)
+    if record_history and result.runmax_history is not None and refine_result.runmax_history is not None:
+        refine_result.runmax_history = np.concatenate([result.runmax_history, refine_result.runmax_history])
     return refine_result
 
 
@@ -738,6 +758,7 @@ def _single_boost(
     partial_option: str,
     use_runmax: bool,
     rng: np.random.Generator,
+    record_history: bool = False,
 ) -> SingleResult:
     # boost 模式：比较 regular 与 boosted 两条路径，返回目标值更优者。
     regular = _single_refine(
@@ -756,6 +777,7 @@ def _single_boost(
         partial_option=partial_option,
         use_runmax=use_runmax,
         rng=rng,
+        record_history=record_history,
     )
     if iter_boost <= 0:
         return regular
@@ -776,6 +798,7 @@ def _single_boost(
         partial_option=partial_option,
         use_runmax=use_runmax,
         rng=rng,
+        record_history=record_history,
     )
     return boosted if boosted.f_optimal > regular.f_optimal else regular
 
@@ -830,6 +853,7 @@ def smco_multi(
         opt_control,
     )
     rng = np.random.default_rng(control["seed"])
+    record_history = bool(control.get("record_history", False))
     results: list[SingleResult] = []
     for start in starts:
         results.append(
@@ -849,6 +873,7 @@ def smco_multi(
                 partial_option=str(control["partial_option"]),
                 use_runmax=bool(control["use_runmax"]),
                 rng=rng,
+                record_history=record_history,
             )
         )
 
@@ -857,13 +882,18 @@ def smco_multi(
     # summary 提供批次统计，便于 benchmark/论文实验后处理。
     endpoints = np.vstack([result.x_optimal for result in results])
     iterations = np.array([result.iterations for result in results], dtype=float)
-    summary = {
+    summary: dict[str, Any] = {
         "n_starts": control["n_starts"],
         "mean_iterations": float(np.mean(iterations)),
         "std_values": float(np.std(values, ddof=1)) if values.size > 1 else 0.0,
         "endpoints": endpoints,
         "values": values,
     }
+
+    if record_history:
+        summary["convergence_histories"] = [
+            r.runmax_history for r in results
+        ]
 
     return SMCOResult(
         best_result=results[best_idx],
@@ -917,6 +947,7 @@ def _run_evolutionary_states(
     iter_boost: int,
     rng: np.random.Generator,
 ) -> tuple[list[SingleResult], list[dict[str, Any]]]:
+    record_history = bool(control.get("record_history", False))
     states = [
         _initialize_smco_state(
             f,
@@ -925,6 +956,7 @@ def _run_evolutionary_states(
             iter_boost=iter_boost,
             use_runmax=bool(control["use_runmax"]),
             birth_iteration=0,
+            record_history=record_history,
         )
         for start in starts
     ]
@@ -973,6 +1005,7 @@ def _run_evolutionary_states(
                 iter_boost=iter_boost + boundary,
                 use_runmax=bool(control["use_runmax"]),
                 birth_iteration=boundary,
+                record_history=record_history,
             )
             for point in generated
         ]
@@ -1037,6 +1070,7 @@ def _refine_evolutionary_results(
         else:
             start_point_refine = np.array(result.x_optimal, dtype=float, copy=True)
 
+        record_history = bool(control.get("record_history", False))
         refine_result = _single(
             f,
             bounds_lower,
@@ -1051,6 +1085,7 @@ def _refine_evolutionary_results(
             partial_option=str(control["partial_option"]),
             use_runmax=bool(control["use_runmax"]),
             rng=rng,
+            record_history=record_history,
         )
         _clip_result_to_bounds(refine_result, f, bounds_lower, bounds_upper)
         if bool(control["use_runmax"]):
@@ -1058,6 +1093,8 @@ def _refine_evolutionary_results(
         refine_result.iterations = int(
             result.iterations + refine_result.iterations - control["iter_nstart"]
         )
+        if record_history and result.runmax_history is not None and refine_result.runmax_history is not None:
+            refine_result.runmax_history = np.concatenate([result.runmax_history, refine_result.runmax_history])
         refined_results.append(refine_result)
 
     return refined_results

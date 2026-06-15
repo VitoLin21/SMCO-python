@@ -1,0 +1,13 @@
+strategy,pair,evo_more_stable,total,evo_stability_rate
+best1bin,SMCO_vs_SMCO_EVO,4,15,26.7
+best1bin,SMCO_R_vs_SMCO_R_EVO,4,15,26.7
+best1bin,SMCO_BR_vs_SMCO_BR_EVO,5,15,33.3
+current-to-best1bin,SMCO_vs_SMCO_EVO,4,15,26.7
+current-to-best1bin,SMCO_R_vs_SMCO_R_EVO,5,15,33.3
+current-to-best1bin,SMCO_BR_vs_SMCO_BR_EVO,5,15,33.3
+rand1bin,SMCO_vs_SMCO_EVO,6,15,40.0
+rand1bin,SMCO_R_vs_SMCO_R_EVO,5,15,33.3
+rand1bin,SMCO_BR_vs_SMCO_BR_EVO,5,15,33.3
+sobol,SMCO_vs_SMCO_EVO,8,15,53.3
+sobol,SMCO_R_vs_SMCO_R_EVO,4,15,26.7
+sobol,SMCO_BR_vs_SMCO_BR_EVO,6,15,40.0

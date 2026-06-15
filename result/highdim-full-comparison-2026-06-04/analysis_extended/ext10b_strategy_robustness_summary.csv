@@ -1,0 +1,5 @@
+strategy,avg_positive_rate,avg_mean_improve,avg_cv,high_robustness_count
+rand1bin,79.4,1.3429,172.2,2
+current-to-best1bin,73.5,1.1133,169.8,0
+best1bin,80.4,1.5015,147.5,2
+sobol,62.8,0.2011,865.5,0

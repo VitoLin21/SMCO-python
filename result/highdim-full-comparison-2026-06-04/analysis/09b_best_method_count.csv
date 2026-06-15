@@ -1,0 +1,7 @@
+algo,times_best,total_configs,is_evo
+GenSA,79,34,False
+SMCO_BR_EVO,18,34,True
+BOBYQA,12,34,False
+SA,12,34,False
+GD,12,34,False
+SMCO_R_EVO,3,34,True

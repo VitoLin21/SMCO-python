@@ -1,0 +1,12 @@
+algo,avg_spearman_rho,avg_degradation_pct,good_scalability_count,poor_scalability_count,is_evo
+SMCO,0.8567,-1622609531.12,20,0,False
+SMCO_R,0.6167,-1489872718.0,16,4,False
+SMCO_BR,0.61,-1220279503.43,16,4,False
+SMCO_EVO,0.6308,-1621258086.47,16,4,True
+SMCO_R_EVO,0.6225,-1486167916.39,16,4,True
+SMCO_BR_EVO,0.6275,-1213619237.58,16,4,True
+GenSA,0.6,-1862520761.88,16,4,False
+SA,0.6,-1862520160.07,16,4,False
+DEoptim,0.6,-234322547.82,16,4,False
+GA,0.6,-838609029.02,16,4,False
+PSO,0.6033,-293512135.45,16,4,False

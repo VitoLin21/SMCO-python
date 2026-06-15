@@ -1,0 +1,13 @@
+strategy,pair,total_configs,sig_005,sig_001,large_effect,medium_effect,small_effect,avg_cohens_d
+rand1bin,SMCO_vs_SMCO_EVO,34,3,3,9,1,24,20.2887
+rand1bin,SMCO_R_vs_SMCO_R_EVO,34,6,5,14,3,17,16.586
+rand1bin,SMCO_BR_vs_SMCO_BR_EVO,34,5,5,16,2,16,13.9455
+current-to-best1bin,SMCO_vs_SMCO_EVO,34,6,4,9,3,22,13.9908
+current-to-best1bin,SMCO_R_vs_SMCO_R_EVO,34,6,5,14,2,18,10.7873
+current-to-best1bin,SMCO_BR_vs_SMCO_BR_EVO,34,6,6,17,3,14,8.2013
+best1bin,SMCO_vs_SMCO_EVO,34,6,4,12,2,20,11.8707
+best1bin,SMCO_R_vs_SMCO_R_EVO,34,6,6,16,3,15,17.4527
+best1bin,SMCO_BR_vs_SMCO_BR_EVO,34,9,7,19,1,14,12.3002
+sobol,SMCO_vs_SMCO_EVO,34,4,4,9,0,25,11.7105
+sobol,SMCO_R_vs_SMCO_R_EVO,34,1,1,7,0,27,5.7937
+sobol,SMCO_BR_vs_SMCO_BR_EVO,34,0,0,4,0,30,0.3438

@@ -202,6 +202,7 @@ def test_smco_r_evo_runs_zero_buffer_refine_even_when_refine_ratio_is_zero(monke
         partial_option,
         use_runmax,
         rng,
+        record_history=False,
     ):
         refine_calls.append((float(bounds_buffer), int(iter_max), int(iter_boost)))
         return SingleResult(x_optimal=np.array([0.9]), f_optimal=0.9, iterations=int(iter_nstart))
