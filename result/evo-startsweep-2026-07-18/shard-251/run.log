@@ -1,0 +1,44 @@
+Output: result/evo-startsweep-2026-07-18/shard-251
+Dims: [5000]
+Fractions: [1.0, 0.5, 0.6666666666666666, 0.75, 0.8]
+Variants: ['SMCO_EVO', 'SMCO_R_EVO', 'SMCO_BR_EVO'] | strategy: rand1bin
+Workers: 22, Seed: 21
+[5000D] 30 tasks, 22 workers
+Output: result/evo-startsweep-2026-07-18/shard-251
+Dims: [5000]
+Fractions: [1.0, 0.5, 0.6666666666666666, 0.75, 0.8]
+Variants: ['SMCO_EVO', 'SMCO_R_EVO', 'SMCO_BR_EVO'] | strategy: rand1bin
+Workers: 22, Seed: 21
+[5000D] 30 tasks, 22 workers
+[5000D] Rastrigin/5000D rep1 SMCO_EVO fopt=-42443.3 16554s (1/30)
+[5000D] Rastrigin/5000D rep0 SMCO_EVO fopt=-42562 16730s (2/30)
+[5000D] Rastrigin/5000D rep1 SMCO_R_EVO fopt=-42322.7 16745s (3/30)
+[5000D] Rastrigin/5000D rep0 SMCO_R_EVO fopt=-42440.7 16793s (4/30)
+[5000D] Rastrigin/5000D rep0 SMCO_BR_EVO fopt=-42626.6 17526s (5/30)
+[5000D] Rastrigin/5000D rep1 SMCO_BR_EVO fopt=-42501.5 18176s (6/30)
+[5000D] Rastrigin/5000D rep0 SMCO_EVO fopt=-42784.3 21637s (7/30)
+[5000D] Rastrigin/5000D rep1 SMCO_EVO fopt=-42602 22514s (8/30)
+[5000D] Rastrigin/5000D rep0 SMCO_R_EVO fopt=-42668 22708s (9/30)
+[5000D] Rastrigin/5000D rep0 SMCO_R_EVO fopt=-42686.9 24313s (10/30)
+[5000D] Rastrigin/5000D rep0 SMCO_BR_EVO fopt=-42833.1 24787s (11/30)
+[5000D] Rastrigin/5000D rep0 SMCO_EVO fopt=-42797.8 25228s (12/30)
+[5000D] Rastrigin/5000D rep0 SMCO_R_EVO fopt=-42691.9 26235s (13/30)
+[5000D] Rastrigin/5000D rep0 SMCO_EVO fopt=-42803.4 26578s (14/30)
+[5000D] Rastrigin/5000D rep0 SMCO_BR_EVO fopt=-42875 27855s (15/30)
+[5000D] Rastrigin/5000D rep0 SMCO_BR_EVO fopt=-42897.3 28801s (16/30)
+[5000D] Rastrigin/5000D rep1 SMCO_EVO fopt=-42657.7 31650s (17/30)
+[5000D] Rastrigin/5000D rep0 SMCO_EVO fopt=-42670.3 32329s (18/30)
+[5000D] Rastrigin/5000D rep1 SMCO_R_EVO fopt=-42556.5 33620s (19/30)
+[5000D] Rastrigin/5000D rep1 SMCO_BR_EVO fopt=-42832.8 34224s (20/30)
+[5000D] Rastrigin/5000D rep0 SMCO_R_EVO fopt=-42568.8 34393s (21/30)
+[5000D] Rastrigin/5000D rep1 SMCO_R_EVO fopt=-42488.7 18610s (22/30)
+[5000D] Rastrigin/5000D rep0 SMCO_BR_EVO fopt=-42864.5 35470s (23/30)
+[5000D] Rastrigin/5000D rep1 SMCO_BR_EVO fopt=-42639 20482s (24/30)
+[5000D] Rastrigin/5000D rep1 SMCO_EVO fopt=-42620.2 20485s (25/30)
+[5000D] Rastrigin/5000D rep1 SMCO_R_EVO fopt=-42509 20563s (26/30)
+[5000D] Rastrigin/5000D rep1 SMCO_BR_EVO fopt=-42670.8 23505s (27/30)
+[5000D] Rastrigin/5000D rep1 SMCO_EVO fopt=-42623.4 22896s (28/30)
+[5000D] Rastrigin/5000D rep1 SMCO_R_EVO fopt=-42512.8 20227s (29/30)
+[5000D] Rastrigin/5000D rep1 SMCO_BR_EVO fopt=-42679.6 22701s (30/30)
+[5000D] DONE 30 tasks in 45216s
+[5000D] DONE (flushed per-task)

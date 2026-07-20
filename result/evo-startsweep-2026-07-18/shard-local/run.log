@@ -1,0 +1,38 @@
+Output: result/evo-startsweep-2026-07-18/shard-local
+Dims: [5000]
+Fractions: [1.0, 0.5, 0.6666666666666666, 0.75, 0.8]
+Variants: ['SMCO_EVO', 'SMCO_R_EVO', 'SMCO_BR_EVO'] | strategy: rand1bin
+Workers: 28, Seed: 21
+[5000D] 30 tasks, 28 workers
+[5000D] Rosenbrock/5000D rep0 SMCO_EVO fopt=-1190.38 6841s (1/30)
+[5000D] Rosenbrock/5000D rep1 SMCO_BR_EVO fopt=-5862.34 7121s (2/30)
+[5000D] Rosenbrock/5000D rep0 SMCO_EVO fopt=-1146.71 7907s (3/30)
+[5000D] Rosenbrock/5000D rep1 SMCO_EVO fopt=-1132.24 8266s (4/30)
+[5000D] Rosenbrock/5000D rep0 SMCO_R_EVO fopt=-325.34 8677s (5/30)
+[5000D] Rosenbrock/5000D rep0 SMCO_R_EVO fopt=-113.36 8849s (6/30)
+[5000D] Rosenbrock/5000D rep0 SMCO_EVO fopt=-1260.1 8890s (7/30)
+[5000D] Rosenbrock/5000D rep1 SMCO_EVO fopt=-1279.55 9677s (8/30)
+[5000D] Rosenbrock/5000D rep1 SMCO_BR_EVO fopt=-986.31 9734s (9/30)
+[5000D] Rosenbrock/5000D rep1 SMCO_R_EVO fopt=-114.431 9756s (10/30)
+[5000D] Rosenbrock/5000D rep1 SMCO_EVO fopt=-1093.79 10148s (11/30)
+[5000D] Rosenbrock/5000D rep0 SMCO_BR_EVO fopt=-1047.25 10272s (12/30)
+[5000D] Rosenbrock/5000D rep1 SMCO_R_EVO fopt=-119.488 11265s (13/30)
+[5000D] Rosenbrock/5000D rep0 SMCO_BR_EVO fopt=-6389.21 12333s (14/30)
+[5000D] Rosenbrock/5000D rep1 SMCO_EVO fopt=-1192.96 13361s (15/30)
+[5000D] Rosenbrock/5000D rep0 SMCO_R_EVO fopt=-118.052 13541s (16/30)
+[5000D] Rosenbrock/5000D rep1 SMCO_R_EVO fopt=-275.63 13927s (17/30)
+[5000D] Rosenbrock/5000D rep1 SMCO_EVO fopt=-1144.01 14459s (18/30)
+[5000D] Rosenbrock/5000D rep0 SMCO_BR_EVO fopt=-10791.7 14495s (19/30)
+[5000D] Rosenbrock/5000D rep1 SMCO_R_EVO fopt=-114.899 7727s (20/30)
+[5000D] Rosenbrock/5000D rep1 SMCO_BR_EVO fopt=-11437.3 7661s (21/30)
+[5000D] Rosenbrock/5000D rep0 SMCO_R_EVO fopt=-185.685 14810s (22/30)
+[5000D] Rosenbrock/5000D rep1 SMCO_BR_EVO fopt=-10453 15212s (23/30)
+[5000D] Rosenbrock/5000D rep0 SMCO_EVO fopt=-1133.91 15290s (24/30)
+[5000D] Rosenbrock/5000D rep0 SMCO_BR_EVO fopt=-11966.4 16051s (25/30)
+[5000D] Rosenbrock/5000D rep1 SMCO_BR_EVO fopt=-76807.9 17574s (26/30)
+[5000D] Rosenbrock/5000D rep0 SMCO_R_EVO fopt=-1390.52 18280s (27/30)
+[5000D] Rosenbrock/5000D rep0 SMCO_EVO fopt=-1063.98 18776s (28/30)
+[5000D] Rosenbrock/5000D rep0 SMCO_BR_EVO fopt=-78018.1 18903s (29/30)
+[5000D] Rosenbrock/5000D rep1 SMCO_R_EVO fopt=-1334.12 19144s (30/30)
+[5000D] DONE 30 tasks in 19145s
+[5000D] DONE (flushed per-task)

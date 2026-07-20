@@ -1,0 +1,39 @@
+nohup: failed to run command '.venv/bin/python': No such file or directory
+Output: result/evo-startsweep-2026-07-18/shard-215
+Dims: [5000]
+Fractions: [1.0, 0.5, 0.6666666666666666, 0.75, 0.8]
+Variants: ['SMCO_EVO', 'SMCO_R_EVO', 'SMCO_BR_EVO'] | strategy: rand1bin
+Workers: 20, Seed: 21
+[5000D] 30 tasks, 20 workers
+[5000D] Ackley/5000D rep1 SMCO_R_EVO fopt=-0.074492 19969s (1/30)
+[5000D] Ackley/5000D rep0 SMCO_R_EVO fopt=-0.0743722 20260s (2/30)
+[5000D] Ackley/5000D rep0 SMCO_EVO fopt=-0.380841 20446s (3/30)
+[5000D] Ackley/5000D rep1 SMCO_EVO fopt=-0.37546 20585s (4/30)
+[5000D] Ackley/5000D rep0 SMCO_BR_EVO fopt=-0.0817712 22970s (5/30)
+[5000D] Ackley/5000D rep0 SMCO_EVO fopt=-0.363735 26662s (6/30)
+[5000D] Ackley/5000D rep0 SMCO_R_EVO fopt=-0.0736982 28470s (7/30)
+[5000D] Ackley/5000D rep0 SMCO_EVO fopt=-0.353428 30360s (8/30)
+[5000D] Ackley/5000D rep0 SMCO_BR_EVO fopt=-0.0805444 31220s (9/30)
+[5000D] Ackley/5000D rep0 SMCO_R_EVO fopt=-0.0737747 32121s (10/30)
+[5000D] Ackley/5000D rep0 SMCO_R_EVO fopt=-0.0739428 32357s (11/30)
+[5000D] Ackley/5000D rep0 SMCO_EVO fopt=-0.349868 33526s (12/30)
+[5000D] Ackley/5000D rep0 SMCO_BR_EVO fopt=-0.0800483 34169s (13/30)
+[5000D] Ackley/5000D rep0 SMCO_BR_EVO fopt=-0.0797979 37198s (14/30)
+[5000D] Ackley/5000D rep1 SMCO_BR_EVO fopt=-0.082121 21559s (15/30)
+[5000D] Ackley/5000D rep1 SMCO_R_EVO fopt=-0.0731549 26615s (16/30)
+[5000D] Ackley/5000D rep1 SMCO_EVO fopt=-0.362343 27813s (17/30)
+[5000D] Ackley/5000D rep1 SMCO_BR_EVO fopt=-11.6692 50096s (18/30)
+[5000D] Ackley/5000D rep0 SMCO_R_EVO fopt=-3.27898 50128s (19/30)
+[5000D] Ackley/5000D rep1 SMCO_EVO fopt=-3.59981 50177s (20/30)
+[5000D] Ackley/5000D rep0 SMCO_BR_EVO fopt=-11.7287 50318s (21/30)
+[5000D] Ackley/5000D rep0 SMCO_EVO fopt=-3.60371 50632s (22/30)
+[5000D] Ackley/5000D rep1 SMCO_R_EVO fopt=-3.28257 51124s (23/30)
+[5000D] Ackley/5000D rep1 SMCO_EVO fopt=-0.352095 28937s (24/30)
+[5000D] Ackley/5000D rep1 SMCO_BR_EVO fopt=-0.0807839 31490s (25/30)
+[5000D] Ackley/5000D rep1 SMCO_R_EVO fopt=-0.0736765 25905s (26/30)
+[5000D] Ackley/5000D rep1 SMCO_EVO fopt=-0.351082 27336s (27/30)
+[5000D] Ackley/5000D rep1 SMCO_R_EVO fopt=-0.0734673 27953s (28/30)
+[5000D] Ackley/5000D rep1 SMCO_BR_EVO fopt=-0.0797027 31151s (29/30)
+[5000D] Ackley/5000D rep1 SMCO_BR_EVO fopt=-0.0799503 31763s (30/30)
+[5000D] DONE 30 tasks in 63885s
+[5000D] DONE (flushed per-task)

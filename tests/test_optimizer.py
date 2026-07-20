@@ -4,11 +4,14 @@ from smco import SMCOResult, SingleResult, smco, smco_br, smco_multi, smco_r
 from smco import smco_br_evo, smco_evo, smco_r_evo
 from smco.optimizer import (
     SMCOState,
+    _compute_dim_group_slices,
     _generate_evolution_points,
+    _generate_evolution_points_grouped,
     _initialize_smco_state,
     _run_evolutionary_states,
     _run_smco_state_until,
     _split_refine_iterations,
+    _validate_dim_groups,
     generate_sobol_points,
 )
 
@@ -1002,3 +1005,151 @@ def test_smco_r_accepts_boundary_refine_ratios(refine_ratio):
     assert x.shape == (1,)
     assert -1.0 <= x[0] <= 1.0
     assert result.opt_control["refine_ratio"] == refine_ratio
+
+
+# ---------------------------------------------------------------------------
+# Per-dimension-group evolution (experiment 2: dimsplit)
+# ---------------------------------------------------------------------------
+
+
+def test_compute_dim_group_slices_covers_range_evenly():
+    assert _compute_dim_group_slices(8, 2) == [(0, 4), (4, 8)]
+    # Remainder distributed to the leading groups (D not divisible by G).
+    assert _compute_dim_group_slices(5, 2) == [(0, 3), (3, 5)]
+    assert _compute_dim_group_slices(10, 3) == [(0, 4), (4, 7), (7, 10)]
+    # Single group is the whole range.
+    assert _compute_dim_group_slices(7, 1) == [(0, 7)]
+    # Union covers [0, D) with no gaps or overlaps for every G up to D.
+    for dim in (1, 6, 13):
+        for groups in range(1, dim + 1):
+            slices = _compute_dim_group_slices(dim, groups)
+            flat = [i for lo, hi in slices for i in range(lo, hi)]
+            assert flat == list(range(dim))
+
+
+def test_validate_dim_groups_bounds():
+    assert _validate_dim_groups(1, 10) == 1
+    assert _validate_dim_groups(8, 8) == 8
+    with pytest.raises(ValueError, match="dim_groups"):
+        _validate_dim_groups(11, 10)
+    with pytest.raises(ValueError, match="positive integer"):
+        _validate_dim_groups(0, 10)
+
+
+def test_generate_evolution_points_grouped_one_group_matches_whole_vector():
+    """G=1 must be numerically identical to the whole-vector generator."""
+    rng_a = np.random.default_rng(2024)
+    rng_b = np.random.default_rng(2024)
+    parents = np.array(
+        [[0.1, -0.2, 0.3, 0.0], [0.4, 0.5, -0.6, 0.1],
+         [-0.3, 0.2, 0.1, -0.1], [0.2, -0.4, 0.0, 0.3],
+         [0.0, 0.1, -0.2, 0.4], [-0.1, 0.3, 0.2, -0.3]],
+        dtype=float,
+    )
+    scores = np.array([3.0, 1.0, 5.0, 2.0, 4.0, 0.5], dtype=float)
+    bounds = (np.array([-2.0] * 4), np.array([2.0] * 4))
+
+    whole = _generate_evolution_points(
+        parents, scores, n_new=4, strategy="rand1bin",
+        bounds_lower=bounds[0], bounds_upper=bounds[1],
+        de_factor=0.8, de_crossover=0.7, rng=rng_a,
+    )
+    grouped = _generate_evolution_points_grouped(
+        parents, scores, n_new=4, strategy="rand1bin", dim_groups=1,
+        bounds_lower=bounds[0], bounds_upper=bounds[1],
+        de_factor=0.8, de_crossover=0.7, rng=rng_b,
+    )
+    assert whole.shape == grouped.shape == (4, 4)
+    assert np.array_equal(whole, grouped)
+
+
+def test_generate_evolution_points_grouped_two_groups_use_independent_parents():
+    """With G=2 each block independently draws its differential parents."""
+    rng = np.random.default_rng(7)
+    parents = np.array(
+        [[0.1, -0.2, 0.3, 0.0], [0.4, 0.5, -0.6, 0.1],
+         [-0.3, 0.2, 0.1, -0.1], [0.2, -0.4, 0.0, 0.3],
+         [0.0, 0.1, -0.2, 0.4], [-0.1, 0.3, 0.2, -0.3]],
+        dtype=float,
+    )
+    scores = np.array([3.0, 1.0, 5.0, 2.0, 4.0, 0.5], dtype=float)
+    bounds = (np.array([-2.0] * 4), np.array([2.0] * 4))
+
+    # G=2: block 0 = dims [0,2), block 1 = dims [2,4). Each block must draw its
+    # own (a,b,c) from _choice_excluding. Replaying the same rng stream, the
+    # first two _choice_excluding draws (for block 0 and block 1 of point 0)
+    # must differ in index combination.
+    import smco.optimizer as opt
+
+    captured: list[np.ndarray] = []
+    real_choice = opt._choice_excluding
+
+    def spy(n_parents, excluded, *, size, rng):
+        out = real_choice(n_parents, excluded, size=size, rng=rng)
+        captured.append(np.array(out))
+        return out
+
+    original = opt._choice_excluding
+    opt._choice_excluding = spy
+    try:
+        result = _generate_evolution_points_grouped(
+            parents, scores, n_new=2, strategy="rand1bin", dim_groups=2,
+            bounds_lower=bounds[0], bounds_upper=bounds[1],
+            de_factor=0.8, de_crossover=0.7, rng=rng,
+        )
+    finally:
+        opt._choice_excluding = original
+
+    assert result.shape == (2, 4)
+    # n_new=2 points x 2 blocks => 4 independent parent draws recorded.
+    assert len(captured) >= 4
+    # Block 0 and block 1 of the first point use different parent triples.
+    first_block = captured[0]
+    second_block = captured[1]
+    assert not np.array_equal(first_block, second_block)
+
+
+def test_smco_evo_dim_groups_one_equals_default():
+    """Regression anchor: dim_groups=1 reproduces the default (whole-vector) run."""
+    objective = lambda x: -float(np.sum(x ** 2))  # noqa: E731
+    bounds = ([-5.0] * 10, [5.0] * 10)
+
+    default = smco_evo(
+        objective, bounds[0], bounds[1], n_starts=10, iter_max=80,
+        evolution_points=(0.5, 0.75), elimination_rate=0.25, seed=999,
+    )
+    grouped_one = smco_evo(
+        objective, bounds[0], bounds[1], n_starts=10, iter_max=80,
+        evolution_points=(0.5, 0.75), elimination_rate=0.25, seed=999,
+        dim_groups=1,
+    )
+    assert default.best_result.f_optimal == pytest.approx(grouped_one.best_result.f_optimal)
+    assert np.allclose(default.best_result.x_optimal, grouped_one.best_result.x_optimal)
+    assert grouped_one.opt_control["dim_groups"] == 1
+
+
+def test_smco_evo_dim_groups_runs_and_records_control():
+    """dim_groups>1 runs end-to-end and is recorded in opt_control."""
+    objective = lambda x: -float(np.sum(x ** 2))  # noqa: E731
+    bounds = ([-5.0] * 8, [5.0] * 8)
+    result = smco_evo(
+        objective, bounds[0], bounds[1], n_starts=10, iter_max=60,
+        evolution_points=(0.5, 0.75), elimination_rate=0.25, seed=42,
+        dim_groups=4,
+    )
+    assert np.isfinite(result.best_result.f_optimal)
+    assert result.opt_control["dim_groups"] == 4
+    assert len(result.summary["evolution_history"]) == 2
+
+
+@pytest.mark.parametrize("variant", [smco_evo, smco_r_evo, smco_br_evo])
+def test_all_evo_variants_accept_dim_groups(variant):
+    """All three evo variants accept and propagate dim_groups."""
+    objective = lambda x: -float(np.sum(x ** 2))  # noqa: E731
+    bounds = ([-5.0] * 6, [5.0] * 6)
+    result = variant(
+        objective, bounds[0], bounds[1], n_starts=12, iter_max=50,
+        seed=7, dim_groups=2,
+    )
+    assert np.isfinite(result.best_result.f_optimal)
+    assert result.opt_control["dim_groups"] == 2

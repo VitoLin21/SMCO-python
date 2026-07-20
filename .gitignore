@@ -5,3 +5,4 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+docs/plan-260615.md

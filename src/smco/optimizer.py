@@ -459,6 +459,120 @@ def _generate_evolution_points(
     return np.vstack(children)
 
 
+def _compute_dim_group_slices(dim: int, n_groups: int) -> list[tuple[int, int]]:
+    """Partition ``[0, dim)`` into ``n_groups`` contiguous slices.
+
+    The first ``dim % n_groups`` groups absorb the remainder (one extra
+    dimension each), so the partition is as even as possible.
+    """
+    base = dim // n_groups
+    remainder = dim % n_groups
+    slices: list[tuple[int, int]] = []
+    start = 0
+    for i in range(n_groups):
+        size = base + (1 if i < remainder else 0)
+        slices.append((start, start + size))
+        start += size
+    return slices
+
+
+def _validate_dim_groups(value: Any, dim: int) -> int:
+    """Validate ``dim_groups``: a positive integer no greater than ``dim``."""
+    n_groups = _as_positive_integer("dim_groups", value)
+    if n_groups > dim:
+        raise ValueError(f"dim_groups ({n_groups}) must not exceed dimension ({dim})")
+    return n_groups
+
+
+def _generate_evolution_points_grouped(
+    parents: np.ndarray,
+    scores: np.ndarray,
+    *,
+    n_new: int,
+    strategy: str,
+    dim_groups: int,
+    bounds_lower: np.ndarray,
+    bounds_upper: np.ndarray,
+    de_factor: float,
+    de_crossover: float,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Per-dimension-group variant of :func:`_generate_evolution_points`.
+
+    Survivors are ranked once on the full-vector objective (selection is shared
+    with whole-vector evolution); only the *mutation* operator is split across
+    ``dim_groups`` contiguous blocks. For each new point a single full-vector
+    ``base`` is drawn (one parent), but every block independently re-draws its
+    differential-evolution parents ``a/b/c`` (or uses the global best), so
+    genetic material for different blocks comes from different parent
+    combinations.
+
+    With ``dim_groups == 1`` this is numerically identical to
+    :func:`_generate_evolution_points` (single block = full vector, one set of
+    parents per point), which serves as the regression anchor.
+    """
+    n_new = int(n_new)
+    bounds_lower, bounds_upper = _validate_bounds(bounds_lower, bounds_upper)
+    if n_new < 1:
+        return np.empty((0, bounds_lower.size), dtype=float)
+
+    parents = np.asarray(parents, dtype=float)
+    scores = np.asarray(scores, dtype=float)
+    if parents.ndim != 2 or parents.shape[1] != bounds_lower.size:
+        raise ValueError("parents must be a two-dimensional array with one column per bound")
+    if scores.ndim != 1 or scores.shape[0] != parents.shape[0]:
+        raise ValueError("scores must be a one-dimensional array with one value per parent")
+    if not np.all(np.isfinite(parents)) or not np.all(np.isfinite(scores)):
+        raise ValueError("parents and scores must contain only finite values")
+    if strategy not in EVOLUTION_STRATEGIES:
+        raise ValueError("evolution_strategy must be one of current-to-best1bin, rand1bin, best1bin, sobol")
+    if (
+        strategy == "sobol"
+        or (strategy in {"rand1bin", "current-to-best1bin"} and parents.shape[0] < 4)
+        or (strategy == "best1bin" and parents.shape[0] < 3)
+    ):
+        return _sobol_replacements(n_new, bounds_lower, bounds_upper, rng)
+
+    dim = bounds_lower.size
+    n_groups = _validate_dim_groups(dim_groups, dim)
+    slices = _compute_dim_group_slices(dim, n_groups)
+
+    best_index = int(np.argmax(scores))
+    best = parents[best_index]
+    children: list[np.ndarray] = []
+    for _ in range(n_new):
+        base_index = int(rng.integers(0, parents.shape[0]))
+        base = parents[base_index]
+        child = np.empty(dim, dtype=float)
+        for lo, hi in slices:
+            base_blk = base[lo:hi]
+            if strategy == "rand1bin":
+                a_idx, b_idx, c_idx = _choice_excluding(
+                    parents.shape[0], {base_index}, size=3, rng=rng,
+                )
+                mutant_blk = parents[a_idx, lo:hi] + de_factor * (
+                    parents[b_idx, lo:hi] - parents[c_idx, lo:hi]
+                )
+            elif strategy == "current-to-best1bin":
+                b_idx, c_idx = _choice_excluding(
+                    parents.shape[0], {base_index, best_index}, size=2, rng=rng,
+                )
+                mutant_blk = base_blk + de_factor * (best[lo:hi] - base_blk) + de_factor * (
+                    parents[b_idx, lo:hi] - parents[c_idx, lo:hi]
+                )
+            else:  # best1bin
+                b_idx, c_idx = _choice_excluding(
+                    parents.shape[0], {best_index}, size=2, rng=rng,
+                )
+                mutant_blk = best[lo:hi] + de_factor * (
+                    parents[b_idx, lo:hi] - parents[c_idx, lo:hi]
+                )
+            child_blk = _binomial_crossover(base_blk, mutant_blk, de_crossover, rng)
+            child[lo:hi] = np.clip(child_blk, bounds_lower[lo:hi], bounds_upper[lo:hi])
+        children.append(child)
+    return np.vstack(children)
+
+
 def _merge_control(user_control: dict[str, Any] | None) -> dict[str, Any]:
     control = dict(DEFAULT_CONTROL)
     if user_control:
@@ -945,6 +1059,7 @@ def _run_evolutionary_states(
     de_crossover: float,
     iter_max: int,
     iter_boost: int,
+    dim_groups: int = 1,
     rng: np.random.Generator,
 ) -> tuple[list[SingleResult], list[dict[str, Any]]]:
     record_history = bool(control.get("record_history", False))
@@ -986,17 +1101,31 @@ def _run_evolutionary_states(
         if eliminated:
             parents = np.vstack([state.ranking_point() for state in survivors])
             scores = np.array([state.ranking_value() for state in survivors], dtype=float)
-            generated = _generate_evolution_points(
-                parents,
-                scores,
-                n_new=len(eliminated),
-                strategy=evolution_strategy,
-                bounds_lower=bounds_lower,
-                bounds_upper=bounds_upper,
-                de_factor=de_factor,
-                de_crossover=de_crossover,
-                rng=rng,
-            )
+            if dim_groups > 1:
+                generated = _generate_evolution_points_grouped(
+                    parents,
+                    scores,
+                    n_new=len(eliminated),
+                    strategy=evolution_strategy,
+                    dim_groups=dim_groups,
+                    bounds_lower=bounds_lower,
+                    bounds_upper=bounds_upper,
+                    de_factor=de_factor,
+                    de_crossover=de_crossover,
+                    rng=rng,
+                )
+            else:
+                generated = _generate_evolution_points(
+                    parents,
+                    scores,
+                    n_new=len(eliminated),
+                    strategy=evolution_strategy,
+                    bounds_lower=bounds_lower,
+                    bounds_upper=bounds_upper,
+                    de_factor=de_factor,
+                    de_crossover=de_crossover,
+                    rng=rng,
+                )
         replacements = [
             _initialize_smco_state(
                 f,
@@ -1112,6 +1241,7 @@ def _run_evolutionary_multi_branch(
     evolution_strategy: str,
     de_factor: float,
     de_crossover: float,
+    dim_groups: int = 1,
 ) -> SMCOResult:
     rng = np.random.default_rng(control["seed"])
     iter_max_initial, iter_max_refine = _split_refine_iterations(
@@ -1132,6 +1262,7 @@ def _run_evolutionary_multi_branch(
         de_crossover=de_crossover,
         iter_max=iter_max_initial,
         iter_boost=control["iter_boost"],
+        dim_groups=dim_groups,
         rng=rng,
     )
 
@@ -1170,6 +1301,7 @@ def smco_evo_multi(
     evolution_strategy: str = "rand1bin",
     de_factor: float = 0.8,
     de_crossover: float = 0.7,
+    dim_groups: int = 1,
 ) -> SMCOResult:
     points, rate, strategy, factor, crossover = _validate_evolution_control(
         evolution_points,
@@ -1185,12 +1317,14 @@ def smco_evo_multi(
         start_points,
         opt_control,
     )
+    n_groups = _validate_dim_groups(dim_groups, lower.size)
     rng = np.random.default_rng(control["seed"])
     control["evolution_points"] = points
     control["elimination_rate"] = rate
     control["evolution_strategy"] = strategy
     control["de_factor"] = factor
     control["de_crossover"] = crossover
+    control["dim_groups"] = n_groups
 
     if control["iter_boost"] <= 0:
         return _run_evolutionary_multi_branch(
@@ -1204,6 +1338,7 @@ def smco_evo_multi(
             evolution_strategy=strategy,
             de_factor=factor,
             de_crossover=crossover,
+            dim_groups=n_groups,
         )
 
     regular_control = dict(control)
@@ -1219,6 +1354,7 @@ def smco_evo_multi(
         evolution_strategy=strategy,
         de_factor=factor,
         de_crossover=crossover,
+        dim_groups=n_groups,
     )
     boosted = _run_evolutionary_multi_branch(
         f,
@@ -1231,6 +1367,7 @@ def smco_evo_multi(
         evolution_strategy=strategy,
         de_factor=factor,
         de_crossover=crossover,
+        dim_groups=n_groups,
     )
     selected_branch = "boosted" if boosted.best_result.f_optimal > regular.best_result.f_optimal else "regular"
     winner = boosted if selected_branch == "boosted" else regular
@@ -1304,6 +1441,7 @@ def smco_evo(
     evolution_strategy = control.pop("evolution_strategy", "rand1bin")
     de_factor = control.pop("de_factor", 0.8)
     de_crossover = control.pop("de_crossover", 0.7)
+    dim_groups = control.pop("dim_groups", 1)
     control["refine_search"] = False
     control["iter_boost"] = 0
     return smco_evo_multi(
@@ -1317,6 +1455,7 @@ def smco_evo(
         evolution_strategy=evolution_strategy,
         de_factor=de_factor,
         de_crossover=de_crossover,
+        dim_groups=dim_groups,
     )
 
 
@@ -1333,6 +1472,7 @@ def smco_r_evo(
     evolution_strategy = control.pop("evolution_strategy", "rand1bin")
     de_factor = control.pop("de_factor", 0.8)
     de_crossover = control.pop("de_crossover", 0.7)
+    dim_groups = control.pop("dim_groups", 1)
     control["refine_search"] = True
     control["iter_boost"] = 0
     control.setdefault("refine_ratio", 0.5)
@@ -1347,6 +1487,7 @@ def smco_r_evo(
         evolution_strategy=evolution_strategy,
         de_factor=de_factor,
         de_crossover=de_crossover,
+        dim_groups=dim_groups,
     )
 
 
@@ -1364,6 +1505,7 @@ def smco_br_evo(
     evolution_strategy = control.pop("evolution_strategy", "rand1bin")
     de_factor = control.pop("de_factor", 0.8)
     de_crossover = control.pop("de_crossover", 0.7)
+    dim_groups = control.pop("dim_groups", 1)
     control["refine_search"] = True
     control["iter_boost"] = iter_boost
     control.setdefault("refine_ratio", 0.5)
@@ -1378,4 +1520,5 @@ def smco_br_evo(
         evolution_strategy=evolution_strategy,
         de_factor=de_factor,
         de_crossover=de_crossover,
+        dim_groups=dim_groups,
     )

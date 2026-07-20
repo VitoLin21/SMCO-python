@@ -1,0 +1,33 @@
+Output: result/evo-startsweep-2026-06-15
+Dims: [1000, 3000, 5000]
+Fractions: [0.5, 0.6666666666666666, 0.75, 0.8]
+Variants: ['SMCO_EVO', 'SMCO_R_EVO', 'SMCO_BR_EVO'] | strategy: rand1bin
+Workers: 40, Seed: 21
+Baseline (reused, not re-run): result/highdim-full-comparison-2026-06-04/all_results.csv
+[1000D] SKIP (already done)
+[3000D] 72 tasks, 40 workers
+[3000D] 7/72 (6929s)
+[3000D] 14/72 (7566s)
+[3000D] 21/72 (8065s)
+[3000D] 28/72 (9486s)
+[3000D] 35/72 (9950s)
+[3000D] 42/72 (10362s)
+[3000D] 49/72 (10777s)
+[3000D] 56/72 (11412s)
+[3000D] 63/72 (11896s)
+[3000D] 70/72 (15159s)
+[3000D] 72/72 (15244s)
+[3000D] SAVED 72 rows
+[5000D] 72 tasks, 40 workers
+[5000D] 7/72 (22830s)
+[5000D] 14/72 (24501s)
+[5000D] 21/72 (27989s)
+[5000D] 28/72 (29974s)
+[5000D] 35/72 (30935s)
+[5000D] 42/72 (32430s)
+[5000D] 49/72 (35232s)
+[5000D] 56/72 (35927s)
+[5000D] 63/72 (37082s)
+[5000D] 70/72 (48495s)
+[5000D] 72/72 (49013s)
+[5000D] SAVED 72 rows
