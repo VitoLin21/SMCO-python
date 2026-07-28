@@ -13,13 +13,12 @@
 #   iter_max = 300, strategy = rand1bin (for SMCO_EVO)
 #   n_starts = max(3, ceil(sqrt(dim)))   # 1000->32, 3000->55, 5000->71
 #
-# SIGN CONVENTION (matches Python baseline's ACTUAL -- reversed -- direction;
-# see docs/direction-bug-2026-06-15.md): the Python baseline passes raw(x) to
-# the maximizer, so it pushes x toward the boundary. To be row-comparable to
-# all_results.csv we do the same here: maximize raw(x). fopt recorded is the
-# maximizer's objective = raw(x*) (NOT the true minimum). This keeps R and
-# Python on the same footing for cross-language comparison; the absolute sign
-# caveat is documented separately.
+# SIGN CONVENTION (FIXED 2026-07-20; see docs/direction-bug-2026-06-15.md and
+# docs/direction-bug-audit-2026-07-20.md): previously matched the Python baseline's
+# REVERSED direction (maximize raw -> push to boundary). Now both Python and R use
+# the correct direction: fobj = -raw(x), maximized => minimizes raw. fopt recorded
+# is -raw(x*) (negative, closer to 0 = better). R and Python remain row-comparable,
+# now on the CORRECT footing.
 #
 # Output: <outdir>/r_highdim_results.csv with columns
 #   strategy, algo, func, dim, rep, fopt, time, iterations, seed
@@ -134,12 +133,12 @@ append_row_locked <- function(row) {
 }
 
 # ---- algorithm runners ----------------------------------------------------
-# maximize raw(x): f_obj returns raw(x) for the maximizer; record raw(x*).
+# minimize raw(x): f_obj returns -raw(x) for the maximizer; record -raw(x*).
 run_algo <- function(algo, cfg, starts, seed) {
   d   <- length(cfg$bounds_lower)
   lo  <- cfg$bounds_lower; hi  <- cfg$bounds_upper
   raw <- cfg$f                       # raw test function (e.g. rastrigin)
-  fobj<- function(x) raw(x)          # maximize raw -> matches Python baseline direction
+  fobj<- function(x) -raw(x)         # minimize raw -> correct direction (fixed 2026-07-20)
 
   t0 <- proc.time()[["elapsed"]]
   iters <- NA_integer_; fopt <- NA_real_

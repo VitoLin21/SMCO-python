@@ -231,9 +231,7 @@ def _run_task(task: dict) -> dict:
         sense = task["sense"]
 
         config = assign_config(func_name, dim)
-        f = config.f
-        if sense == "min":
-            f = lambda x, _f=config.f: -_f(x)
+        f = config.f  # config.f 已是 -raw；最大化它 = 最小化 raw（正确方向）
 
         opts = _algo_options(algo_name, dict(DEFAULT_OPTIONS), algo_seed, strategy)
 

@@ -78,10 +78,7 @@ def _output_dir(base: str | None) -> Path:
 
 def _make_objective(name: str, dim: int):
     config = assign_config(name, dim)
-    if config.sense == "min":
-        f = lambda x, _f=config.f: -_f(x)
-    else:
-        f = config.f
+    f = config.f  # config.f 已是 -raw（min）；最大化它 = 最小化 raw（正确方向）
     return config, f
 
 
