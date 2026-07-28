@@ -28,6 +28,14 @@ from smco.highdim_instances import (
     instance_seed,
     write_instance_artifacts,
 )
+from smco.experiment_manifests import (
+    build_manifest,
+    e1_algorithm_configs,
+    expand_tasks,
+    freeze_manifest,
+    verify_manifest,
+    write_manifest,
+)
 
 # E1 development function set (Michalewicz replaced by Zakharov, 2026-07-29).
 E1_FUNCTIONS = ("Rastrigin", "Ackley", "Griewank", "Zakharov")
@@ -127,13 +135,83 @@ def build_instance_set(
     return index
 
 
+def load_instance_index(path):
+    """Load a Task 6 instances_index.json into a lookup keyed by (function, dim, iid).
+
+    Normalises provenance fields so :func:`expand_tasks` can attach
+    ``instance_hash`` / ``start_points_hash`` from the instance artifacts.
+    """
+    data = json.loads(Path(path).read_text())
+    index = {}
+    for entry in data.get("instances", []):
+        entry = dict(entry)
+        hashes = entry.get("file_hashes", {})
+        entry.setdefault("instance_hash", entry.get("transform_sha256"))
+        entry.setdefault("start_points_hash", hashes.get("starts"))
+        index[(entry["function"], entry["dimension"], entry["instance_id"])] = entry
+    return index
+
+
+def build_manifest_for_suite(
+    *,
+    stage,
+    suite,
+    functions,
+    dims,
+    n_instances,
+    fe_budget_per_d,
+    checkpoints_per_d,
+    configs=None,
+    instance_index=None,
+    manifest_id=None,
+    freeze=True,
+    out_dir=None,
+    dry_run=False,
+):
+    """Expand the E1-style task grid, freeze, and write a manifest.
+
+    Links instance provenance from ``instance_index`` (a Task 6 index) when
+    provided so each task carries ``instance_hash`` / ``start_points_hash``.
+    """
+    configs = configs if configs is not None else e1_algorithm_configs()
+    tasks = expand_tasks(
+        stage,
+        suite,
+        functions,
+        dims,
+        n_instances,
+        configs,
+        fe_budget_per_d=fe_budget_per_d,
+        checkpoints_per_d=checkpoints_per_d,
+        instance_index=instance_index,
+    )
+    if dry_run:
+        return {
+            "dry_run": True,
+            "stage": stage,
+            "suite": suite,
+            "n_tasks": len(tasks),
+            "unique_run_ids": len({t["run_id"] for t in tasks}),
+            "total_fe_budget": sum(t["fe_budget"] for t in tasks),
+            "frozen": freeze,
+        }
+    manifest = build_manifest(stage, suite, tasks, manifest_id=manifest_id)
+    if freeze:
+        manifest = freeze_manifest(manifest)
+    if out_dir is not None:
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        write_manifest(manifest, out_dir / f"{manifest['manifest_id']}.json")
+    return manifest
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--stage",
-        choices=["instances"],
+        choices=["instances", "manifest"],
         default="instances",
-        help="Task 6 only implements instance generation; manifests arrive in Task 7.",
+        help="instances: Task 6 instance artifacts; manifest: Task 7 frozen run manifest.",
     )
     parser.add_argument(
         "--suite-stage",
@@ -161,6 +239,22 @@ def main(argv=None) -> int:
         help=f"Block-rotation size (default {DEFAULT_BLOCK_SIZE}).",
     )
     parser.add_argument("--dry-run", action="store_true", help="Report plan only; write nothing.")
+    parser.add_argument(
+        "--manifest-stage",
+        default="e1_development",
+        help="paper_contract stage for the manifest (e.g. e1_development, e2_factorial_highdim).",
+    )
+    parser.add_argument("--suite", default="synthetic_highdim", help="paper_contract suite.")
+    parser.add_argument("--fe-budget-per-d", type=int, default=1000, help="FE budget as multiple of dimension.")
+    parser.add_argument(
+        "--checkpoints-per-d",
+        nargs="+",
+        type=int,
+        default=[100, 250, 500, 1000],
+        help="Checkpoints as multiples of dimension.",
+    )
+    parser.add_argument("--instances-index", default=None, help="Path to instances_index.json to link provenance.")
+    parser.add_argument("--no-freeze", action="store_true", help="Write an unfrozen manifest.")
     args = parser.parse_args(argv)
 
     if args.stage == "instances":
@@ -184,6 +278,36 @@ def main(argv=None) -> int:
             print(
                 f"built {len(index['instances'])} instances at {args.out_dir} "
                 f"(index: {Path(args.out_dir) / 'instances_index.json'})"
+            )
+        return 0
+
+    if args.stage == "manifest":
+        instance_index = (
+            load_instance_index(args.instances_index) if args.instances_index else None
+        )
+        manifest = build_manifest_for_suite(
+            stage=args.manifest_stage,
+            suite=args.suite,
+            functions=args.functions,
+            dims=args.dims,
+            n_instances=args.n_instances,
+            fe_budget_per_d=args.fe_budget_per_d,
+            checkpoints_per_d=args.checkpoints_per_d,
+            instance_index=instance_index,
+            freeze=not args.no_freeze,
+            out_dir=args.out_dir,
+            dry_run=args.dry_run,
+        )
+        if args.dry_run:
+            print(
+                f"[dry-run] {manifest['n_tasks']} tasks, "
+                f"{manifest['unique_run_ids']} unique run_ids, "
+                f"total FE budget {manifest['total_fe_budget']}"
+            )
+        else:
+            print(
+                f"wrote {'frozen' if manifest['frozen'] else 'unfrozen'} manifest "
+                f"{manifest['manifest_id']} ({manifest['n_tasks']} tasks) to {args.out_dir}"
             )
         return 0
 
