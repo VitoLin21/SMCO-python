@@ -7,6 +7,13 @@ import math
 import numpy as np
 import scipy.stats.qmc as qmc
 
+from .evaluation import (
+    DEFAULT_GAP_TARGETS,
+    EvaluationContext,
+    EvaluationBudgetExceeded,
+    evaluate_with_context,
+)
+from .paper_contract import EVENTS
 from .results import SMCOResult, SingleResult
 
 Objective = Callable[[np.ndarray], float]
@@ -222,6 +229,7 @@ def compute_partial_signs(
     bounds_upper: np.ndarray,
     partial_option: str = "center",
     use_runmax: bool = True,
+    ctx: EvaluationContext | None = None,
 ) -> PartialSignResult:
     x_work = np.array(x, dtype=float, copy=True)
     partial_signs = np.zeros_like(x_work, dtype=float)
@@ -234,10 +242,10 @@ def compute_partial_signs(
             original = float(x_work[j])
 
             x_work[j] = min(original + h_step[j], bounds_upper[j])
-            f_plus = float(f(x_work))
+            f_plus = evaluate_with_context(ctx, f, x_work, event="finite_difference")
 
             x_work[j] = max(original - h_step[j], bounds_lower[j])
-            f_minus = float(f(x_work))
+            f_minus = evaluate_with_context(ctx, f, x_work, event="finite_difference")
 
             sign = f_plus > f_minus
             partial_signs[j] = 1.0 if sign else 0.0
@@ -259,11 +267,11 @@ def compute_partial_signs(
 
             if original >= bounds_upper[j]:
                 x_work[j] = max(original - h_step[j], bounds_lower[j])
-                f_perturb = float(f(x_work))
+                f_perturb = evaluate_with_context(ctx, f, x_work, event="finite_difference")
                 sign = fx > f_perturb
             else:
                 x_work[j] = min(original + h_step[j], bounds_upper[j])
-                f_perturb = float(f(x_work))
+                f_perturb = evaluate_with_context(ctx, f, x_work, event="finite_difference")
                 sign = f_perturb > fx
 
             partial_signs[j] = 1.0 if sign else 0.0
@@ -600,9 +608,11 @@ def _initialize_smco_state(
     use_runmax: bool,
     birth_iteration: int = 0,
     record_history: bool = False,
+    ctx: EvaluationContext | None = None,
+    event: str = "initialization",
 ) -> SMCOState:
     x_current = np.array(start_point, dtype=float, copy=True)
-    f_current = float(f(x_current))
+    f_current = evaluate_with_context(ctx, f, x_current, event=event)
     n_boost_1 = int(iter_boost) + int(iter_nstart)
     x_runmax = np.array(x_current, copy=True) if use_runmax else None
     f_runmax = float(f_current) if use_runmax else None
@@ -636,6 +646,7 @@ def _run_smco_state_until(
     partial_option: str,
     use_runmax: bool,
     rng: np.random.Generator,
+    ctx: EvaluationContext | None = None,
 ) -> None:
     bounds_diff = bounds_upper - bounds_lower
     fixed_pushout = float(bounds_buffer) * bounds_diff
@@ -647,7 +658,14 @@ def _run_smco_state_until(
     if state.stopped_target_n is not None and target_n <= state.stopped_target_n:
         return
 
+    dim = int(bounds_diff.size)
+    partial_cost = 2 * dim if partial_option == "center" else dim
+    step_cost = partial_cost + 1
+
     while state.current_n <= target_n:
+        if ctx is not None and not ctx.can_evaluate(step_cost):
+            ctx.termination_reason = "evaluation_budget"
+            break
         n = state.current_n
         h_step = bounds_diff / (n + 1)
         partial = compute_partial_signs(
@@ -659,6 +677,7 @@ def _run_smco_state_until(
             bounds_upper,
             partial_option,
             use_runmax,
+            ctx=ctx,
         )
         if buffer_rand:
             pushout = float(bounds_buffer) * bounds_diff * rng.uniform(-1.0, 1.0, size=bounds_diff.size)
@@ -671,7 +690,7 @@ def _run_smco_state_until(
         z_value = partial.signs * bounds_upper_out + (1.0 - partial.signs) * bounds_lower_out
         state.s_value = state.s_value + z_value
         x_next = state.s_value / (n + 1)
-        f_next = float(f(x_next))
+        f_next = evaluate_with_context(ctx, f, x_next, event="iterate")
 
         if use_runmax:
             f_next_best = max(partial.f_partial_best, f_next)
@@ -710,6 +729,7 @@ def _single(
     use_runmax: bool,
     rng: np.random.Generator,
     record_history: bool = False,
+    ctx: EvaluationContext | None = None,
 ) -> SingleResult:
     state = _initialize_smco_state(
         f,
@@ -718,6 +738,7 @@ def _single(
         iter_boost=iter_boost,
         use_runmax=use_runmax,
         record_history=record_history,
+        ctx=ctx,
     )
     _run_smco_state_until(
         state,
@@ -731,6 +752,7 @@ def _single(
         partial_option,
         use_runmax,
         rng,
+        ctx=ctx,
     )
     return state.to_result()
 
@@ -740,18 +762,21 @@ def _clip_result_to_bounds(
     f: Objective,
     bounds_lower: np.ndarray,
     bounds_upper: np.ndarray,
+    *,
+    ctx: EvaluationContext | None = None,
 ) -> None:
     # 输出阶段统一做边界裁剪，避免返回值落在用户定义边界之外。
+    # 裁剪后的重新评价计入 FE；预算耗尽时保留原始一致 (x, f)，不强行越界评价。
     checked = check_bounds(result.x_optimal, bounds_lower, bounds_upper)
-    if checked.is_out:
+    if checked.is_out and (ctx is None or ctx.can_evaluate(1)):
         result.x_optimal = checked.x_in
-        result.f_optimal = float(f(checked.x_in))
+        result.f_optimal = evaluate_with_context(ctx, f, checked.x_in, event="clip_recheck")
 
     if result.x_runmax is not None:
         checked_runmax = check_bounds(result.x_runmax, bounds_lower, bounds_upper)
-        if checked_runmax.is_out:
+        if checked_runmax.is_out and (ctx is None or ctx.can_evaluate(1)):
             result.x_runmax = checked_runmax.x_in
-            result.f_runmax = float(f(checked_runmax.x_in))
+            result.f_runmax = evaluate_with_context(ctx, f, checked_runmax.x_in, event="clip_recheck")
 
 
 def _promote_runmax(result: SingleResult) -> None:
@@ -792,6 +817,7 @@ def _single_refine(
     use_runmax: bool,
     rng: np.random.Generator,
     record_history: bool = False,
+    ctx: EvaluationContext | None = None,
 ) -> SingleResult:
     # refine 模式分为两段：先常规搜索，再以第一段最优点做零缓冲精修。
     ratio = float(refine_ratio) if refine_search else 0.0
@@ -812,10 +838,17 @@ def _single_refine(
         use_runmax=use_runmax,
         rng=rng,
         record_history=record_history,
+        ctx=ctx,
     )
-    _clip_result_to_bounds(result, f, bounds_lower, bounds_upper)
+    _clip_result_to_bounds(result, f, bounds_lower, bounds_upper, ctx=ctx)
 
     if not refine_search:
+        if use_runmax:
+            _promote_runmax(result)
+        return result
+
+    if ctx is not None and not ctx.can_evaluate(1):
+        # 预算不足以启动 refine 重启初始化：保留第一段搜索结果，不强占预算。
         if use_runmax:
             _promote_runmax(result)
         return result
@@ -845,8 +878,9 @@ def _single_refine(
         use_runmax=use_runmax,
         rng=rng,
         record_history=record_history,
+        ctx=(ctx.scoped("refine") if ctx is not None else None),
     )
-    _clip_result_to_bounds(refine_result, f, bounds_lower, bounds_upper)
+    _clip_result_to_bounds(refine_result, f, bounds_lower, bounds_upper, ctx=ctx)
 
     if use_runmax:
         _promote_runmax(refine_result)
@@ -873,6 +907,7 @@ def _single_boost(
     use_runmax: bool,
     rng: np.random.Generator,
     record_history: bool = False,
+    ctx: EvaluationContext | None = None,
 ) -> SingleResult:
     # boost 模式：比较 regular 与 boosted 两条路径，返回目标值更优者。
     regular = _single_refine(
@@ -892,6 +927,7 @@ def _single_boost(
         use_runmax=use_runmax,
         rng=rng,
         record_history=record_history,
+        ctx=ctx,
     )
     if iter_boost <= 0:
         return regular
@@ -913,6 +949,7 @@ def _single_boost(
         use_runmax=use_runmax,
         rng=rng,
         record_history=record_history,
+        ctx=(ctx.scoped("boost") if ctx is not None else None),
     )
     return boosted if boosted.f_optimal > regular.f_optimal else regular
 
@@ -968,8 +1005,11 @@ def smco_multi(
     )
     rng = np.random.default_rng(control["seed"])
     record_history = bool(control.get("record_history", False))
+    ctx = _maybe_build_context(f, control)
     results: list[SingleResult] = []
     for start in starts:
+        if ctx is not None and not ctx.can_evaluate(1):
+            break
         results.append(
             _single_boost(
                 f,
@@ -988,6 +1028,7 @@ def smco_multi(
                 use_runmax=bool(control["use_runmax"]),
                 rng=rng,
                 record_history=record_history,
+                ctx=ctx,
             )
         )
 
@@ -1008,6 +1049,8 @@ def smco_multi(
         summary["convergence_histories"] = [
             r.runmax_history for r in results
         ]
+    if ctx is not None:
+        summary["fe"] = ctx.summary()
 
     return SMCOResult(
         best_result=results[best_idx],
@@ -1061,20 +1104,25 @@ def _run_evolutionary_states(
     iter_boost: int,
     dim_groups: int = 1,
     rng: np.random.Generator,
+    ctx: EvaluationContext | None = None,
 ) -> tuple[list[SingleResult], list[dict[str, Any]]]:
     record_history = bool(control.get("record_history", False))
-    states = [
-        _initialize_smco_state(
-            f,
-            np.asarray(start, dtype=float),
-            iter_nstart=control["iter_nstart"],
-            iter_boost=iter_boost,
-            use_runmax=bool(control["use_runmax"]),
-            birth_iteration=0,
-            record_history=record_history,
+    states: list[SMCOState] = []
+    for start in starts:
+        if ctx is not None and not ctx.can_evaluate(1):
+            break
+        states.append(
+            _initialize_smco_state(
+                f,
+                np.asarray(start, dtype=float),
+                iter_nstart=control["iter_nstart"],
+                iter_boost=iter_boost,
+                use_runmax=bool(control["use_runmax"]),
+                birth_iteration=0,
+                record_history=record_history,
+                ctx=ctx,
+            )
         )
-        for start in starts
-    ]
     history: list[dict[str, Any]] = []
 
     for boundary in _evolution_boundaries(iter_max, evolution_points):
@@ -1091,6 +1139,7 @@ def _run_evolutionary_states(
                 str(control["partial_option"]),
                 bool(control["use_runmax"]),
                 rng,
+                ctx=ctx,
             )
 
         ranked = sorted(states, key=lambda state: state.ranking_value(), reverse=True)
@@ -1126,18 +1175,23 @@ def _run_evolutionary_states(
                     de_crossover=de_crossover,
                     rng=rng,
                 )
-        replacements = [
-            _initialize_smco_state(
-                f,
-                point,
-                iter_nstart=control["iter_nstart"],
-                iter_boost=iter_boost + boundary,
-                use_runmax=bool(control["use_runmax"]),
-                birth_iteration=boundary,
-                record_history=record_history,
+        replacements: list[SMCOState] = []
+        for point in generated:
+            if ctx is not None and not ctx.can_evaluate(1):
+                break
+            replacements.append(
+                _initialize_smco_state(
+                    f,
+                    point,
+                    iter_nstart=control["iter_nstart"],
+                    iter_boost=iter_boost + boundary,
+                    use_runmax=bool(control["use_runmax"]),
+                    birth_iteration=boundary,
+                    record_history=record_history,
+                    ctx=ctx,
+                    event="replacement_initialization",
+                )
             )
-            for point in generated
-        ]
         best_before = float(ranked[0].ranking_value())
         states = survivors + replacements
         history.append(
@@ -1166,10 +1220,11 @@ def _run_evolutionary_states(
             str(control["partial_option"]),
             bool(control["use_runmax"]),
             rng,
+            ctx=ctx,
         )
         result = state.to_result()
         _normalize_evolutionary_result_iterations(result, state)
-        _clip_result_to_bounds(result, f, bounds_lower, bounds_upper)
+        _clip_result_to_bounds(result, f, bounds_lower, bounds_upper, ctx=ctx)
         if bool(control["use_runmax"]):
             _promote_runmax(result)
         results.append(result)
@@ -1186,9 +1241,14 @@ def _refine_evolutionary_results(
     *,
     iter_max_refine: int,
     rng: np.random.Generator,
+    ctx: EvaluationContext | None = None,
 ) -> list[SingleResult]:
     refined_results: list[SingleResult] = []
     for result in results:
+        if ctx is not None and not ctx.can_evaluate(1):
+            # 预算不足以启动该条轨迹的 refine 重启：保留搜索结果原样。
+            refined_results.append(result)
+            continue
         if (
             bool(control["use_runmax"])
             and result.x_runmax is not None
@@ -1215,8 +1275,9 @@ def _refine_evolutionary_results(
             use_runmax=bool(control["use_runmax"]),
             rng=rng,
             record_history=record_history,
+            ctx=(ctx.scoped("refine") if ctx is not None else None),
         )
-        _clip_result_to_bounds(refine_result, f, bounds_lower, bounds_upper)
+        _clip_result_to_bounds(refine_result, f, bounds_lower, bounds_upper, ctx=ctx)
         if bool(control["use_runmax"]):
             _promote_runmax(refine_result)
         refine_result.iterations = int(
@@ -1242,6 +1303,7 @@ def _run_evolutionary_multi_branch(
     de_factor: float,
     de_crossover: float,
     dim_groups: int = 1,
+    ctx: EvaluationContext | None = None,
 ) -> SMCOResult:
     rng = np.random.default_rng(control["seed"])
     iter_max_initial, iter_max_refine = _split_refine_iterations(
@@ -1264,6 +1326,7 @@ def _run_evolutionary_multi_branch(
         iter_boost=control["iter_boost"],
         dim_groups=dim_groups,
         rng=rng,
+        ctx=ctx,
     )
 
     if bool(control["refine_search"]):
@@ -1275,18 +1338,95 @@ def _run_evolutionary_multi_branch(
             control,
             iter_max_refine=iter_max_refine,
             rng=rng,
+            ctx=ctx,
         )
 
+    extra_summary = {
+        "evolution_history": evolution_history,
+        "evolution_strategy": evolution_strategy,
+        "evolution_points": evolution_points,
+        "elimination_rate": elimination_rate,
+    }
+    if ctx is not None:
+        extra_summary["fe"] = ctx.summary()
     return _build_multi_result(
         results,
         control,
-        extra_summary={
-            "evolution_history": evolution_history,
-            "evolution_strategy": evolution_strategy,
-            "evolution_points": evolution_points,
-            "elimination_rate": elimination_rate,
-        },
+        extra_summary=extra_summary,
     )
+
+
+def _maybe_build_context(
+    f: Objective, control: dict[str, Any]
+) -> EvaluationContext | None:
+    """Pop FE-budget keys from ``control`` and build an EvaluationContext.
+
+    Returns ``None`` (and still strips the optional keys) when no ``max_evals``
+    is requested, so the optimizer stays on its raw-objective path.
+    """
+    max_evals = control.pop("max_evals", None)
+    optional_keys = (
+        "record_evaluations",
+        "record_trace",
+        "objective_sense",
+        "known_optimum",
+        "gap_targets",
+    )
+    if max_evals is None:
+        for key in optional_keys:
+            control.pop(key, None)
+        return None
+    record_evaluations = bool(control.pop("record_evaluations", False))
+    record_trace = bool(control.pop("record_trace", False)) or record_evaluations
+    objective_sense = str(control.pop("objective_sense", "maximize"))
+    known_optimum = control.pop("known_optimum", None)
+    if known_optimum is not None:
+        known_optimum = float(known_optimum)
+    gap_targets = control.pop("gap_targets", None)
+    if gap_targets is None:
+        gap_targets = DEFAULT_GAP_TARGETS
+    return EvaluationContext(
+        f,
+        max_evals=int(max_evals),
+        objective_sense=objective_sense,
+        known_optimum=known_optimum,
+        gap_targets=gap_targets,
+        record_trace=record_trace,
+        record_evaluations=record_evaluations,
+    )
+
+
+def _merge_split_fe(
+    regular_ctx: EvaluationContext, boosted_ctx: EvaluationContext
+) -> dict[str, Any]:
+    """Aggregate FE summaries of the regular/boosted EVO-BR split branches."""
+    reg = regular_ctx.summary()
+    boo = boosted_ctx.summary()
+    reg_counts = reg["evaluation_counts_by_event"]
+    boo_counts = boo["evaluation_counts_by_event"]
+    merged_counts = {
+        event: int(reg_counts.get(event, 0)) + int(boo_counts.get(event, 0))
+        for event in EVENTS
+    }
+    candidates = [v for v in (reg["best_value"], boo["best_value"]) if v is not None]
+    if candidates:
+        if regular_ctx.objective_sense == "maximize":
+            best_value = float(max(candidates))
+        else:
+            best_value = float(min(candidates))
+    else:
+        best_value = None
+    return {
+        "fe_budget": int(reg["fe_budget"] or 0) + int(boo["fe_budget"] or 0),
+        "fe_used": int(reg["fe_used"]) + int(boo["fe_used"]),
+        "termination_reason": reg["termination_reason"] or boo["termination_reason"],
+        "evaluation_counts_by_event": merged_counts,
+        "best_value": best_value,
+        "branch_fe": {
+            "regular": int(reg["fe_used"]),
+            "boosted": int(boo["fe_used"]),
+        },
+    }
 
 
 def smco_evo_multi(
@@ -1326,6 +1466,8 @@ def smco_evo_multi(
     control["de_crossover"] = crossover
     control["dim_groups"] = n_groups
 
+    ctx = _maybe_build_context(f, control)
+
     if control["iter_boost"] <= 0:
         return _run_evolutionary_multi_branch(
             f,
@@ -1339,10 +1481,16 @@ def smco_evo_multi(
             de_factor=factor,
             de_crossover=crossover,
             dim_groups=n_groups,
+            ctx=ctx,
         )
 
     regular_control = dict(control)
     regular_control["iter_boost"] = 0
+    if ctx is not None:
+        regular_ctx = ctx.split(fraction=0.5)
+        boosted_ctx = ctx.split(fraction=0.5)
+    else:
+        regular_ctx = boosted_ctx = None
     regular = _run_evolutionary_multi_branch(
         f,
         lower,
@@ -1355,6 +1503,7 @@ def smco_evo_multi(
         de_factor=factor,
         de_crossover=crossover,
         dim_groups=n_groups,
+        ctx=regular_ctx,
     )
     boosted = _run_evolutionary_multi_branch(
         f,
@@ -1368,6 +1517,7 @@ def smco_evo_multi(
         de_factor=factor,
         de_crossover=crossover,
         dim_groups=n_groups,
+        ctx=boosted_ctx,
     )
     selected_branch = "boosted" if boosted.best_result.f_optimal > regular.best_result.f_optimal else "regular"
     winner = boosted if selected_branch == "boosted" else regular
@@ -1378,6 +1528,8 @@ def smco_evo_multi(
         "regular_best": float(regular.best_result.f_optimal),
         "boosted_best": float(boosted.best_result.f_optimal),
     }
+    if regular_ctx is not None:
+        summary["fe"] = _merge_split_fe(regular_ctx, boosted_ctx)
     return SMCOResult(
         best_result=winner.best_result,
         all_results=winner.all_results,
