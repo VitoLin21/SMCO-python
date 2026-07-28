@@ -1,7 +1,7 @@
 # SMCO-EVO 高维论文实验方案
 
 日期：2026-07-28  
-状态：实验设计草案；在确认性实验启动前冻结  
+状态：高维主线修订版；Task 1--4 已完成，确认性实验尚未启动
 适用范围：SMCO-EVO 的 Python/R 实现、state-preserving/restart 语义及高维优化表现
 
 配套实现计划：
@@ -11,11 +11,11 @@
 
 本文不把 SMCO-EVO 描述为对所有问题都无条件更好的通用优化器，而聚焦以下命题：
 
-> 在中高维和超高维连续黑盒优化中，SMCO-EVO 通过阶段性淘汰低质量轨迹并从优质轨迹生成新起点，可以提高固定函数评价预算下的资源利用效率；这种收益受到状态延续语义和语言实现的共同影响。
+> 在中高维和超高维连续黑盒优化中，SMCO-EVO 通过阶段性淘汰低质量轨迹并从优质轨迹生成新起点，可以提高固定函数评价预算下的资源利用效率。
 
 论文的主要实验维度为 `d = 200--5000`。低维实验只承担三项任务：
 
-1. 验证 Python/R 实现与两种状态语义的正确性；
+1. 验证候选实现和函数评价预算的正确性；
 2. 检查 SMCO-EVO 是否在低维上出现系统性退化；
 3. 与原始 SMCO 论文的实验设置建立联系。
 
@@ -27,38 +27,38 @@
 
 ### 2.1 研究问题
 
-- **RQ1：EVO 增益。** 在相同语言、相同 SMCO family、相同起点和相同函数评价预算下，EVO 是否优于非 EVO 基线？
-- **RQ2：状态语义。** 保留完整轨迹状态和在演化边界重新启动，哪种语义在高维上更有效？
-- **RQ3：语言实现。** Python 与 R 的实现包是否产生可复现的性能差异？
-- **RQ4：交互效应。** 语言差异是否会改变 state-preserving 与 restart 的相对排序？
-- **RQ5：维度效应。** EVO 相对非 EVO 的收益是否随维度增加而增强？
-- **RQ6：资源效率。** EVO 是否能用较少起点达到与 `ceil(sqrt(d))` 起点策略相当或更好的结果？
+- **RQ1：EVO 增益。** 在相同起点和相同函数评价预算下，选定的 SMCO-EVO 是否优于对应非 EVO 基线？
+- **RQ2：高维竞争力。** 在 `d = 1000, 3000, 5000` 上，SMCO-EVO 是否能与强全局优化算法竞争？
+- **RQ3：维度效应。** EVO 相对基线的收益是否随维度增加而增强？
+- **RQ4：非轴对齐稳健性。** 收益能否在 shift、asymmetry、permutation 和 block rotation 后保持？
+- **RQ5：资源效率。** EVO 是否能用较少起点达到与 `ceil(sqrt(d))` 起点策略相当或更好的结果？
+- **RQ6：机制来源。** 收益主要来自淘汰、补点、DE 变异还是状态记忆？
 
-这里的“语言效应”严格解释为“Python/R 实现包的总体差异”，其中可能包含
-数值库、随机数实现和运行时开销；除非跨语言轨迹测试完成，否则不把它解释为
-编程语言本身的因果效应。
+Python/R 和 state-preserving/restart 只作为开发集中的候选实现，不作为论文主要研究因素。
+论文 Methods 必须披露最终选中的语言、代码版本和语义，但不需要证明不同语言逐轨迹一致，
+也不需要对“语言效应”作统计结论。
 
 ### 2.2 确认性假设
 
 - **H1（主要假设）：** 在 `d = 1000, 3000, 5000` 的保留测试集上，
   开发集选出的 SMCO-EVO 实现，其 ECDF-AUC 高于对应非 EVO 基线。
 - **H2：** EVO 相对基线的配对收益随 `log(d)` 增加，维度-算法交互项为正。
-- **H3：** 对选中的 SMCO family，state-preserving 与 restart 在保留测试集上存在非零性能差异；采用双侧检验，不预设方向。
-- **H4：** 对选中的 SMCO family，语言与状态语义存在或不存在交互，以
-  difference-in-differences 及其置信区间报告，不只给出单一 p 值。
+- **H3：** 在新的非轴对齐高维实例上，选定 SMCO-EVO 的优势仍然存在。
+- **H4：** 在相同 FE 预算下，固定 8 个起点的 SMCO-EVO 不劣于
+  `ceil(sqrt(d))` 起点配置，并具有更高资源效率。
 
 低维退化检查、四种进化策略比较、起点数和 evolution schedule 消融均属于次要分析。
 
-## 3. 2x2 实验因子与命名
+## 3. 候选实现与选型边界
 
-### 3.1 两个核心因素
+### 3.1 已完成的候选实现
 
 | 语言实现 | state-preserving（SP） | restart（RS） |
 | --- | --- | --- |
-| Python | 已有，需要加入严格 FE 计数 | 待实现 |
-| R | 待实现 | 已有，需要明确标注为 RS |
+| Python | 已完成 | 已完成 |
+| R | 已完成 | 已完成 |
 
-每个单元格均包含三个 SMCO family：
+Task 1--4 已完成，因此四种候选实现均可用于小规模开发选型。每个单元格均可包含三个 SMCO family：
 
 - `SMCO_EVO`
 - `SMCO_R_EVO`
@@ -80,6 +80,9 @@ family = smco | smco_refine | smco_boost_refine
 evolutionary = true | false
 ```
 
+这张表不是确认性实验的完整因子设计。E1 只用它选择一个全局实现；E1 之后，
+E2--E5 只运行冻结赢家及其 matched base，不再把语言或语义比较扩展成论文主问题。
+
 ### 3.2 两种语义的算法合同
 
 **State-preserving：**
@@ -95,7 +98,8 @@ evolutionary = true | false
 - 重置局部递推状态，但保留全局 best-so-far archive；
 - 重启初始化产生的函数评价必须计入总预算。
 
-这两个版本是并列算法变体，不能把 restart 称为 state-preserving 的“R 复现”。
+这两个版本是并列算法变体。最终选中哪一个，就按其真实语义定义论文中的 SMCO-EVO；
+不能在 Methods 中把 restart 写成 state-preserving，反之亦然。
 
 ## 4. 公平预算与共同运行协议
 
@@ -156,15 +160,15 @@ n_starts = 8
 
 每个 `(suite, function, dimension, instance, replication)` 生成一个不可变运行清单：
 
-- Python/R 共享完全相同的初始点矩阵；
-- 四个 2x2 单元共享同一个主种子；
+- E1 中所有候选实现共享完全相同的初始点矩阵；
+- 候选实现共享同一个主种子；
 - 所有输入矩阵和变换参数保存到磁盘并记录 SHA-256；
 - 随机种子由稳定哈希从 run key 派生，不依赖任务执行顺序；
 - 并行调度不能改变随机结果。
 
-跨语言性能实验允许 Python/R 使用各自实现的随机流，但必须使用相同主种子并进行
-多实例配对。另做一个小型 portable-random-tape 轨迹实验，用来判断实现差异来自
-算法语义还是 RNG/库差异。
+Python/R 可以使用各自实现的随机流。开发集选型依靠多实例总体表现，不要求逐轨迹一致。
+Portable random tape 仅在出现无法解释的巨大差异、怀疑实现错误时作为可选诊断工具，
+不阻塞高维主实验。
 
 ### 4.5 失败与重跑规则
 
@@ -176,9 +180,10 @@ n_starts = 8
 
 ## 5. 分阶段实验
 
-### E0：实现合同和跨语言轨迹验证
+### E0：核心实现合同验证（已完成）
 
-目的：在大规模计算前证明四个 2x2 单元确实实现了预期语义。
+目的：在大规模计算前证明 FE budget、Python restart 和 R state-preserving
+均实现了预期合同。
 
 配置：
 
@@ -195,12 +200,17 @@ n_starts = 8
 3. replacement 只从 survivor 的 running-best points 生成；
 4. 淘汰排序使用 running-best value；
 5. 所有函数评价均被计数；
-6. Python/R 在 portable random tape 下的淘汰集合、父代索引、replacement 点和
-   best-so-far 轨迹在数值容差内一致；
-7. maximize/minimize 方向在所有入口一致；
-8. 同一 seed 重跑完全可复现。
+6. maximize/minimize 方向在所有入口一致；
+7. 同一 seed 重跑完全可复现。
 
-E0 未通过时不得启动 E1。
+完成证据：
+
+- Python FE budget：16 tests passed；
+- Python semantics：13 tests passed；
+- R budget：`ALL R BUDGET TESTS PASSED`；
+- R semantics：`ALL R EVOLUTION-SEMANTICS TESTS PASSED`。
+
+跨语言 portable-random-tape 不属于 E0 必需验收。
 
 ### E1：高维开发集与全局选型
 
@@ -222,11 +232,15 @@ E0 未通过时不得启动 E1。
    防止构造和评价成本变成 `O(d^2)`；
 5. 变换后仍保存已知全局最优值和可验证的最优点。
 
-算法矩阵：
+候选矩阵：
 
 - 12 个 EVO 单元：`2 languages x 2 semantics x 3 families`；
 - 6 个非 EVO 基线：`2 languages x 3 families`；
 - 共 18 个算法配置。
+
+这里的完整矩阵只用于选择 canonical implementation，不用于在论文中研究语言或语义效应。
+如果 pilot 表明全部 18 个配置成本过高，可以先在较小开发子集上筛到 3--4 个候选，
+但筛选规则和子集必须在运行前固定。
 
 预算：
 
@@ -262,13 +276,14 @@ selected_state_semantics
 selected_configuration_hash
 ```
 
-随后创建只读的确认性 manifest。主文可以重点展示该赢家，但补充材料必须展示
-E1 的全部 18 个配置。
+随后创建只读的确认性 manifest。主文只需要说明赢家的选型规则、语言、代码版本和语义；
+E1 的完整候选结果放补充材料或开发记录。
 
-### E1B：可跨语言基线的实现选型
+### E1B：Comparison implementation 选择（可选）
 
-如果同一个 comparison algorithm 在 Python 和 R 中都有语义相符的成熟实现，
-也按开发集规则选择一次全局实现：
+语言对比不是论文目标。Comparison algorithms 默认直接使用项目中最成熟、接口最稳定的
+canonical implementation，并在 manifest 中固定。只有同一个算法确实存在两个语义相符、
+成本可控的成熟实现时，才按开发集规则选择一次：
 
 - 使用 E1 的 60 个问题实例；
 - 使用相同 FE budget、主种子和失败规则；
@@ -285,11 +300,12 @@ E1 的全部 18 个配置。
 60 problem instances x 5 families x 2 languages = 600 runs
 ```
 
-E1B 选择在 E2/E3 前与 SMCO 赢家一起冻结。
+如果不执行 E1B，则在 pilot 前直接冻结 comparison implementation。无论是否执行，
+都不能在 E2/E3 结果出来后更换实现。
 
-### E2：1000--5000 维 2x2 确认性实验
+### E2：1000--5000 维核心确认性实验
 
-目的：在新的实例上验证语言、状态语义以及二者交互。
+目的：在新的实例上验证冻结 SMCO-EVO 是否优于 matched non-EVO base。
 
 问题集：
 
@@ -303,9 +319,9 @@ E1B 选择在 E2/E3 前与 SMCO 赢家一起冻结。
 
 算法：
 
-- E1 选中的 family 的四个 2x2 EVO 单元；
-- Python 与 R 下对应的两个非 EVO family 基线；
-- 共 6 个配置。
+- E1 冻结的唯一 SMCO-EVO 赢家；
+- 同语言、同 family 的 matched non-EVO base；
+- 共 2 个配置。
 
 预算：
 
@@ -321,7 +337,7 @@ checkpoints = {100, 250, 500, 1000, 2000} * d FE
 总运行数：
 
 ```text
-3 functions x (5 + 3 + 2) instances x 6 configurations = 180 runs
+3 functions x (5 + 3 + 2) instances x 2 configurations = 60 runs
 ```
 
 ### E3：高维强基线对比
@@ -333,7 +349,7 @@ checkpoints = {100, 250, 500, 1000, 2000} * d FE
 - Rastrigin、Ackley、Rosenbrock、Griewank、Zakharov；
 - `d = 1000, 3000, 5000`；
 - 重复数同 E2；
-- 与 E2 使用相同实例以形成配对，但不改变 E2 的 2x2 统计。
+- 与 E2 使用相同实例以形成配对，但不重复计算 winner/base。
 
 算法：
 
@@ -345,8 +361,8 @@ checkpoints = {100, 250, 500, 1000, 2000} * d FE
 - PSO；
 - 适用于高维的 separable/limited-memory CMA-ES。
 
-对每个比较算法，若存在多个语言实现，在 E1B 上用同一规则选择一个全局实现，
-但必须在 E2/E3 前冻结。禁止在确认性结果出来后按函数挑选 Python 或 R 版本。
+所有比较算法的具体实现必须在 E2/E3 前冻结。禁止在确认性结果出来后按函数挑选
+Python 或 R 版本。
 
 预算与 E2 相同，主结果到 `2000 * d FE`。结果较差或运行较慢的算法仍保留，
 超出预注册 wall-time cap 时按失败处理。
@@ -374,7 +390,7 @@ E2 与 E3 重复的 winner/base 结果只计算一次。
 
 - 冻结的 SMCO-EVO 赢家；
 - matched base；
-- E1B 中排名最高的三个强基线，但这三个名称必须在 E4 manifest
+- E3 中预先定义的三个代表性强基线；名称必须在 E4 manifest
   启动前写死；
 - 共 5 个配置。
 
@@ -485,11 +501,11 @@ Wall time、峰值内存和 FE/s 作为次要工程指标，必须在相同机�
 
 - H1：winner EVO 对 matched base 的分层 bootstrap ECDF-AUC 差异；
 - H2：paired gain 对 `log(d)` 的斜率，函数作为分层/随机效应；
-- H3：在 Python 和 R 内分别比较 SP 与 RS；
-- H4：计算
-  `(R_SP - R_RS) - (PY_SP - PY_RS)` 的 difference-in-differences；
+- H3：在 shift/asymmetry/permutation/block-rotation 实例上，
+  winner EVO 对 matched base 的配对效应；
+- H4：`n_starts=8` 对 `ceil(sqrt(d))` 的非劣效与 FE 效率比较；
 - 同时报告 median paired log-ratio、bootstrap 95% CI 和 probability of superiority；
-- H3/H4 的有限组主检验使用 Holm 校正，`alpha = 0.05`；
+- 有限组主检验使用 Holm 校正，`alpha = 0.05`；
 - 函数和实例采用分层 bootstrap，先重采样函数，再在函数内重采样实例。
 
 当 target 未命中时按右删失处理；不得把未命中样本删除后只在成功 run 上比较。
@@ -502,7 +518,7 @@ Wall time、峰值内存和 FE/s 作为次要工程指标，必须在相同机�
 2. E2--E5 之前冻结；
 3. 不按函数、维度、seed 或目标精度分别选择实现；
 4. 主文明确标注选择过程；
-5. 补充材料报告全部 2x2 单元和 E1 全部 family；
+5. 补充材料或开发记录报告 E1 候选矩阵，不把它解释为语言比较实验；
 6. 若保留测试上赢家不再占优，必须如实报告，不回到 E1 选择第二名。
 
 因此，主文可以说“selected implementation”，不能说“每个任务取 Python/R 中较好的结果”。
@@ -571,9 +587,9 @@ result/smco-evo-paper-highdim-2026/
 
 主文建议保留以下内容：
 
-1. **算法图：** state-preserving 与 restart 在演化边界处的状态变化；
+1. **算法图：** 冻结 SMCO-EVO 的淘汰、补点和继续搜索过程；
 2. **表 1：** E1 的全局选型规则和冻结结果；
-3. **图 1：** E2 中四个 2x2 单元的高维 ECDF；
+3. **图 1：** E2 中 winner 与 matched base 的高维 ECDF；
 4. **图 2：** winner、matched base 与强基线在 E3 上的 ECDF；
 5. **图 3：** EVO/base 性能比随维度变化；
 6. **图 4：** `d = 1000, 3000, 5000` 的 anytime curves；
@@ -587,17 +603,20 @@ result/smco-evo-paper-highdim-2026/
 - 起点数、策略、调度和状态组成消融；
 - 低维非退化检查；
 - wall time、内存、失败和 timeout；
-- Python/R 环境与 portable-random-tape 对齐结果。
+- 最终实现的语言、版本、语义与环境；
+- 如实际执行，再附 portable-random-tape 诊断结果。
 
 ## 9. 实施顺序与闸门
 
-### Gate 1：实现和计数
+### Gate 1：实现和计数（已完成）
 
 1. 增加统一 FE counter/hard budget；
 2. 实现 Python-RS；
 3. 实现真正的 R-SP；
 4. 明确重命名或标记现有 R-RS；
 5. 完成 E0 测试。
+
+2026-07-28 已通过 Python/R budget 与 semantics 合同测试。Task 5 不再属于 Gate 1。
 
 ### Gate 2：小型性能 pilot
 
@@ -610,13 +629,13 @@ result/smco-evo-paper-highdim-2026/
 
 - 完整执行 E1；
 - 根据预注册规则选择全局赢家；
-- 对存在可比 Python/R 实现的 comparison family 完成 E1B；
+- comparison implementations 在 pilot 前冻结；E1B 如无必要可以跳过；
 - 写入 `selected_configuration_hash`；
 - 生成并冻结确认性 manifest。
 
 ### Gate 4：确认性实验
 
-1. E2 高维 2x2；
+1. E2 winner vs matched base；
 2. E3 高维强基线；
 3. E4 BBOB-large-scale；
 4. E5 低维检查；
@@ -639,7 +658,7 @@ result/smco-evo-paper-highdim-2026/
 - `scripts/analyze_smco_evo_highdim_paper.py`：唯一正式汇总入口；
 - `tests/test_evaluation_budget.py`：FE 预算回归；
 - `tests/test_evolution_semantics.py`：SP/RS 合同；
-- `tests/test_cross_language_traces.py`：读取 Python/R trace 后比较。
+- `tests/test_cross_language_traces.py`：可选诊断，不是正式实验前置条件。
 
 实现时先写详细代码计划，再逐步修改；不要直接改动现有
 `result/rerun-2026-07-20/` 或覆盖已有高维结果。
@@ -661,7 +680,7 @@ result/smco-evo-paper-highdim-2026/
 - 加入完整 E4 BBOB-large-scale；
 - 完成状态组成消融；
 - 对随机 maximum-score/empirical-welfare 问题做独立验证；
-- 增加 portable RNG 后的跨语言全轨迹对齐；
+- 在发现实现异常时增加 portable RNG 跨语言全轨迹诊断；
 - 若理论工作可推进，给出 EVO 调度不破坏 survivor 单轨迹收敛性质的命题。
 
 ## 12. 方案的关键取舍
@@ -671,7 +690,7 @@ result/smco-evo-paper-highdim-2026/
 - 高维是主要结论，低维只做边界检查；
 - 用 FE 而不是 `iter_max` 保证公平；
 - 只选一个全局语言/语义实现，不按任务事后取最好值；
-- 保留全部 2x2 结果，使“选择较好实现”可审计；
+- 语言和语义只用于开发选型，不作为确认性研究因素；
 - 使用 block rotation 让 1000--5000 维的非轴对齐测试可计算；
 - 新确认性结果与已经观察过的 7 月结果严格分开。
 
