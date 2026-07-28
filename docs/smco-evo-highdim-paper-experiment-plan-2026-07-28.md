@@ -218,10 +218,16 @@ Portable random tape 仅在出现无法解释的巨大差异、怀疑实现错�
 
 问题集：
 
-- 函数：Rastrigin、Ackley、Griewank、Michalewicz；
+- 函数：Rastrigin、Ackley、Griewank、Zakharov；
 - 维度：`d = 200, 500, 1000`；
 - 每个函数-维度 5 个实例；
 - 共 `4 x 3 x 5 = 60` 个问题实例。
+
+> 注：E1 原列 Michalewicz，但高维 Michalewicz 全局最小值无解析解（`assign_config`
+> 对任意维度返回 `known_min=None`），无法满足下方第 5 点"保存已知全局最优值"，
+> 也会污染 `normalized_gap` 与 `target-hit` 指标分母。故改用 Zakharov
+> （已知全局最小值 `0`，最优解 `x = 0`），保持 `4 x 3 x 5 = 60` 结构不变。
+> 此变更于 2026-07-29 经用户确认。
 
 实例变换遵循原始 SMCO 论文的思想：
 
