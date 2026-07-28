@@ -121,7 +121,7 @@ run_evolutionary_states <- function(f, bounds_lower, bounds_upper, start_points,
                                     opt_control, evolution_points,
                                     elimination_rate, evolution_strategy,
                                     de_factor, de_crossover, iter_max,
-                                    iter_boost) {
+                                    iter_boost, budget = NULL) {
   d <- length(bounds_lower)
   n_starts <- nrow(start_points)
   bounds_buffer <- opt_control$bounds_buffer
@@ -143,20 +143,25 @@ run_evolutionary_states <- function(f, bounds_lower, bounds_upper, start_points,
   # the trajectory math is identical; only the bookkeeping differs.)
 
   states <- vector("list", n_starts)
+  n_init <- 0L
   for (i in seq_len(n_starts)) {
+    if (!is.null(budget) && !ctx_can_evaluate(budget, 1L)) break
     res <- SMCO_single(f, bounds_lower, bounds_upper,
                        start_point = start_points[i, ],
                        bounds_buffer = bounds_buffer, buffer_rand = buffer_rand,
                        iter_max = 0L, iter_nstart = iter_nstart,
                        iter_boost = iter_boost, tol_conv = tol_conv,
-                       partial_option = partial_option, use_runmax = use_runmax)
-    states[[i]] <- list(
+                       partial_option = partial_option, use_runmax = use_runmax,
+                       budget = budget)
+    n_init <- n_init + 1L
+    states[[n_init]] <- list(
       x = res$x_optimal, f = res$f_optimal,
       x_runmax = if (use_runmax) res$x_runmax else NULL,
       f_runmax = if (use_runmax) res$f_runmax else res$f_optimal,
       iterations = res$iterations, birth = 0L
     )
   }
+  if (n_init < n_starts) states <- states[seq_len(n_init)]
 
   history <- list()
   boundaries <- .evolution_boundaries(iter_max, evolution_points)
@@ -166,13 +171,14 @@ run_evolutionary_states <- function(f, bounds_lower, bounds_upper, start_points,
     for (i in seq_along(states)) {
       st <- states[[i]]
       target <- boundary - st$birth
-      if (target > 0L) {
+      if (target > 0L && (is.null(budget) || ctx_can_evaluate(budget, 1L))) {
         res <- SMCO_single(f, bounds_lower, bounds_upper,
                            start_point = st$x_runmax %||% st$x,
                            bounds_buffer = bounds_buffer, buffer_rand = buffer_rand,
                            iter_max = target, iter_nstart = iter_nstart,
                            iter_boost = iter_boost + st$birth, tol_conv = tol_conv,
-                           partial_option = partial_option, use_runmax = use_runmax)
+                           partial_option = partial_option, use_runmax = use_runmax,
+                           budget = budget)
         states[[i]] <- list(
           x = res$x_optimal, f = res$f_optimal,
           x_runmax = if (use_runmax) res$x_runmax else NULL,
@@ -199,12 +205,14 @@ run_evolutionary_states <- function(f, bounds_lower, bounds_upper, start_points,
                                            de_factor = de_factor,
                                            de_crossover = de_crossover)
       for (j in seq_len(nrow(new_pts))) {
+        if (!is.null(budget) && !ctx_can_evaluate(budget, 1L)) break
         res <- SMCO_single(f, bounds_lower, bounds_upper,
                            start_point = new_pts[j, ],
                            bounds_buffer = bounds_buffer, buffer_rand = buffer_rand,
                            iter_max = 0L, iter_nstart = iter_nstart,
                            iter_boost = iter_boost + boundary, tol_conv = tol_conv,
-                           partial_option = partial_option, use_runmax = use_runmax)
+                           partial_option = partial_option, use_runmax = use_runmax,
+                           budget = if (is.null(budget)) NULL else ctx_scoped(budget, "replacement_initialization"))
         states[[eliminated_idx[j]]] <- list(
           x = res$x_optimal, f = res$f_optimal,
           x_runmax = if (use_runmax) res$x_runmax else NULL,
@@ -228,13 +236,14 @@ run_evolutionary_states <- function(f, bounds_lower, bounds_upper, start_points,
   for (i in seq_along(states)) {
     st <- states[[i]]
     target <- iter_max - st$birth
-    if (target > 0L) {
+    if (target > 0L && (is.null(budget) || ctx_can_evaluate(budget, 1L))) {
       res <- SMCO_single(f, bounds_lower, bounds_upper,
                          start_point = st$x_runmax %||% st$x,
                          bounds_buffer = bounds_buffer, buffer_rand = buffer_rand,
                          iter_max = target, iter_nstart = iter_nstart,
                          iter_boost = iter_boost + st$birth, tol_conv = tol_conv,
-                         partial_option = partial_option, use_runmax = use_runmax)
+                         partial_option = partial_option, use_runmax = use_runmax,
+                         budget = budget)
       f_opt <- if (use_runmax) max(res$f_runmax, res$f_optimal) else res$f_optimal
       x_opt <- if (use_runmax && res$f_runmax >= res$f_optimal) res$x_runmax else res$x_optimal
       results[[i]] <- list(
@@ -279,57 +288,11 @@ SMCO_EVO <- function(f, bounds_lower, bounds_upper, start_points = NULL, ...,
          paste(EVOLUTION_STRATEGIES, collapse = ", "))
   }
 
-  opt_control <- list(...)
-  default_control <- list(
-    iter_max = 300, iter_boost = 0, bounds_buffer = 0.05, buffer_rand = TRUE,
-    tol_conv = 1e-8, refine_search = FALSE, refine_ratio = 0.5,
-    partial_option = "center", use_runmax = TRUE, seed = 123
-  )
-  for (name in names(default_control)) {
-    if (is.null(opt_control[[name]])) opt_control[[name]] <- default_control[[name]]
-  }
-
-  d <- length(bounds_lower)
-  if (is.null(opt_control$n_starts)) opt_control$n_starts <- max(5, round(sqrt(d)))
-
-  if (is.null(start_points)) {
-    set.seed(opt_control$seed)
-    start_points <- generate_sobol_points(opt_control$n_starts, bounds_lower, bounds_upper,
-                                          opt_control$seed)
-  } else {
-    start_points <- as.matrix(start_points)
-    opt_control$n_starts <- nrow(start_points)
-  }
-  if (is.null(opt_control$iter_nstart)) opt_control$iter_nstart <- opt_control$n_starts
-
-  evo <- run_evolutionary_states(
-    f, bounds_lower, bounds_upper, start_points, opt_control,
-    evolution_points = evolution_points,
-    elimination_rate = elimination_rate,
-    evolution_strategy = evolution_strategy,
-    de_factor = de_factor, de_crossover = de_crossover,
-    iter_max = opt_control$iter_max,
-    iter_boost = opt_control$iter_boost
-  )
-
-  results <- evo$results
-  f_values <- sapply(results, function(x) x$f_optimal)
-  best_idx <- which.max(f_values)
-
-  list(
-    best_result = results[[best_idx]],
-    all_results = results,
-    opt_control = opt_control,
-    evolution_history = evo$history,
-    evolution_strategy = evolution_strategy,
-    evolution_points = evolution_points,
-    elimination_rate = elimination_rate,
-    summary = list(
-      n_starts = opt_control$n_starts,
-      values = f_values,
-      endpoints = t(sapply(results, function(x) x$x_optimal))
-    )
-  )
+  opt_control <- .default_evo_control(list(...))
+  opt_control$refine_search <- FALSE
+  opt_control$iter_boost <- 0
+  .run_evo_core(f, bounds_lower, bounds_upper, start_points, opt_control,
+                evolution_points, elimination_rate, evolution_strategy, de_factor, de_crossover)
 }
 
 
@@ -348,8 +311,12 @@ SMCO_EVO <- function(f, bounds_lower, bounds_upper, start_points = NULL, ...,
 }
 
 # Refine ONE evolutionary result with a single SMCO_single segment.
-.refine_one_evo_result <- function(result, f, lo, hi, opt_control, iter_max_refine) {
+.refine_one_evo_result <- function(result, f, lo, hi, opt_control, iter_max_refine,
+                                   budget = NULL) {
   use_runmax <- isTRUE(opt_control$use_runmax)
+  # Refine restart needs one init evaluation; skip if the budget cannot afford it.
+  if (!is.null(budget) && !ctx_can_evaluate(budget, 1L)) return(result)
+  budget_refine <- if (is.null(budget)) NULL else ctx_scoped(budget, "refine")
   if (use_runmax && !is.null(result$x_runmax) && !is.null(result$f_runmax) &&
       result$f_runmax > result$f_optimal) {
     start_refine <- result$x_runmax
@@ -362,20 +329,21 @@ SMCO_EVO <- function(f, bounds_lower, bounds_upper, start_points = NULL, ...,
                             iter_boost = opt_control$iter_boost + 1000L,
                             tol_conv = opt_control$tol_conv,
                             partial_option = opt_control$partial_option,
-                            use_runmax = use_runmax)
+                            use_runmax = use_runmax, budget = budget_refine)
   if (use_runmax) {
     check <- check_bounds(refine_res$x_runmax, lo, hi)
     x_rm <- if (check$is_out) check$x_in else refine_res$x_runmax
-    f_rm <- if (check$is_out) f(x_rm) else refine_res$f_runmax
+    f_rm <- if (check$is_out && (is.null(budget_refine) || ctx_can_evaluate(budget_refine, 1L)))
+            eval_fe(budget_refine, f, x_rm, event = "clip_recheck") else refine_res$f_runmax
     if (f_rm > refine_res$f_optimal) {
       refine_res$f_optimal <- f_rm
       refine_res$x_optimal <- x_rm
     }
   } else {
     check <- check_bounds(refine_res$x_optimal, lo, hi)
-    if (check$is_out) {
+    if (check$is_out && (is.null(budget_refine) || ctx_can_evaluate(budget_refine, 1L))) {
       refine_res$x_optimal <- check$x_in
-      refine_res$f_optimal <- f(check$x_in)
+      refine_res$f_optimal <- eval_fe(budget_refine, f, check$x_in, event = "clip_recheck")
     }
   }
   refine_res$iterations <- as.integer(result$iterations + refine_res$iterations - opt_control$iter_nstart)
@@ -385,7 +353,8 @@ SMCO_EVO <- function(f, bounds_lower, bounds_upper, start_points = NULL, ...,
 # evo + optional refine — port of _run_evolutionary_multi_branch.
 .run_evolutionary_branch <- function(f, lo, hi, start_points, opt_control,
                                      evolution_points, elimination_rate,
-                                     evolution_strategy, de_factor, de_crossover) {
+                                     evolution_strategy, de_factor, de_crossover,
+                                     budget = NULL) {
   splits <- .split_refine_iterations(opt_control$iter_max, opt_control$refine_ratio,
                                      opt_control$refine_search)
   evo <- run_evolutionary_states(f, lo, hi, start_points, opt_control,
@@ -393,13 +362,31 @@ SMCO_EVO <- function(f, bounds_lower, bounds_upper, start_points = NULL, ...,
                                  elimination_rate = elimination_rate,
                                  evolution_strategy = evolution_strategy,
                                  de_factor = de_factor, de_crossover = de_crossover,
-                                 iter_max = splits[1], iter_boost = opt_control$iter_boost)
+                                 iter_max = splits[1], iter_boost = opt_control$iter_boost,
+                                 budget = budget)
   results <- evo$results
   if (isTRUE(opt_control$refine_search) && splits[2] > 0L) {
     results <- lapply(results, .refine_one_evo_result, f = f, lo = lo, hi = hi,
-                      opt_control = opt_control, iter_max_refine = splits[2])
+                      opt_control = opt_control, iter_max_refine = splits[2], budget = budget)
   }
   list(results = results, history = evo$history)
+}
+
+# Aggregate FE summaries of the regular/boosted EVO-BR split branches (mirrors
+# Python _merge_split_fe).
+.merge_split_fe <- function(reg_ctx, boo_ctx) {
+  reg <- ctx_summary(reg_ctx); boo <- ctx_summary(boo_ctx)
+  rc <- unlist(reg$evaluation_counts_by_event); bc <- unlist(boo$evaluation_counts_by_event)
+  merged <- as.list(rc + bc)
+  cands <- c(reg$best_value, boo$best_value)
+  cands <- cands[!is.na(cands)]
+  best <- if (length(cands) == 0) NULL else if (isTRUE(reg_ctx$maximize)) max(cands) else min(cands)
+  list(fe_budget = reg$fe_budget + boo$fe_budget,
+       fe_used = reg$fe_used + boo$fe_used,
+       termination_reason = reg$termination_reason %||% boo$termination_reason,
+       evaluation_counts_by_event = merged,
+       best_value = best,
+       branch_fe = list(regular = reg$fe_used, boosted = boo$fe_used))
 }
 
 # Resolve defaults + start_points, run one (R_EVO) or two (BR_EVO) branches, pack result.
@@ -419,33 +406,47 @@ SMCO_EVO <- function(f, bounds_lower, bounds_upper, start_points = NULL, ...,
   }
   if (is.null(opt_control$iter_nstart)) opt_control$iter_nstart <- opt_control$n_starts
 
+  # Build FE budget (NULL -> legacy). maybe_build_budget pops the FE keys.
+  mb <- maybe_build_budget(f, opt_control)
+  if (is.null(mb)) { budget <- NULL } else { budget <- mb$budget; opt_control <- mb$opt_control }
+
   if (opt_control$iter_boost > 0) {
+    if (is.null(budget)) { reg_budget <- NULL; boo_budget <- NULL } else {
+      reg_budget <- ctx_split(budget, fraction = 0.5)
+      boo_budget <- ctx_split(budget, fraction = 0.5)
+    }
     boosted <- .run_evolutionary_branch(f, bounds_lower, bounds_upper, start_points, opt_control,
                                         evolution_points, elimination_rate, evolution_strategy,
-                                        de_factor, de_crossover)
+                                        de_factor, de_crossover, budget = boo_budget)
     regular_ctrl <- opt_control
     regular_ctrl$iter_boost <- 0
     regular <- .run_evolutionary_branch(f, bounds_lower, bounds_upper, start_points, regular_ctrl,
                                         evolution_points, elimination_rate, evolution_strategy,
-                                        de_factor, de_crossover)
+                                        de_factor, de_crossover, budget = reg_budget)
     b_best <- max(sapply(boosted$results, function(x) x$f_optimal))
     r_best <- max(sapply(regular$results, function(x) x$f_optimal))
     if (b_best >= r_best) { chosen <- boosted; sel <- "boosted" } else { chosen <- regular; sel <- "regular" }
+    split_budget <- !is.null(budget)
   } else {
     chosen <- .run_evolutionary_branch(f, bounds_lower, bounds_upper, start_points, opt_control,
                                        evolution_points, elimination_rate, evolution_strategy,
-                                       de_factor, de_crossover)
+                                       de_factor, de_crossover, budget = budget)
     sel <- NA
+    split_budget <- FALSE
   }
   results <- chosen$results
   f_values <- sapply(results, function(x) x$f_optimal)
   best_idx <- which.max(f_values)
+  out_summary <- list(n_starts = opt_control$n_starts, values = f_values,
+                      endpoints = t(sapply(results, function(x) x$x_optimal)))
+  if (!is.null(budget)) {
+    out_summary$fe <- if (split_budget) .merge_split_fe(reg_budget, boo_budget) else ctx_summary(budget)
+  }
   list(best_result = results[[best_idx]], all_results = results, opt_control = opt_control,
        evolution_history = chosen$history, evolution_strategy = evolution_strategy,
        evolution_points = evolution_points, elimination_rate = elimination_rate,
        boost_selection = sel,
-       summary = list(n_starts = opt_control$n_starts, values = f_values,
-                      endpoints = t(sapply(results, function(x) x$x_optimal))))
+       summary = out_summary)
 }
 
 .default_evo_control <- function(overrides) {

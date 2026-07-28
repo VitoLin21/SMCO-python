@@ -214,5 +214,5 @@ def test_context_best_value_matches_run_best_result():
     )
     fe = result.summary["fe"]
     assert fe["best_value"] == pytest.approx(result.best_result.f_optimal)
-    # Concave quadratic solved well -> the tightest gap target is hit.
-    assert fe["target_hit_evaluations"]["target_hit_fe_0.1"] is not None
+    # Concave quadratic solved well -> the widest gap target is hit.
+    assert fe["target_hit_evaluations"]["target_hit_fe_1e-1"] is not None

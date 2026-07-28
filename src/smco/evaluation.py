@@ -33,6 +33,19 @@ Objective = Callable[[np.ndarray], float]
 # Default minimization-gap targets recorded as target-hit FE (contract 6.1).
 DEFAULT_GAP_TARGETS: tuple[float, ...] = (1e-1, 1e-2, 1e-3, 1e-5)
 
+# Canonical CSV suffixes for the default targets (paper_contract.RESULT_COLUMNS).
+_GAP_LABEL_BY_VALUE: dict[float, str] = {
+    1e-1: "1e-1",
+    1e-2: "1e-2",
+    1e-3: "1e-3",
+    1e-5: "1e-5",
+}
+
+
+def _gap_target_label(value: float) -> str:
+    """Canonical CSV suffix for a gap target; matches RESULT_COLUMNS naming."""
+    return _GAP_LABEL_BY_VALUE.get(value, f"{value:g}")
+
 
 class EvaluationBudgetExceeded(RuntimeError):
     """Raised when an evaluation is attempted beyond the hard ``max_evals`` cap.
@@ -90,6 +103,7 @@ class EvaluationContext:
         self._maximize = objective_sense == "maximize"
         self._known_optimum = known_optimum
         self._gap_targets = tuple(gap_targets)
+        self._target_labels = tuple(_gap_target_label(t) for t in self._gap_targets)
         self._record_trace = bool(record_trace)
         self._record_evaluations = bool(record_evaluations)
         # Owned mutable state (scoped views route through ``_parent``).
@@ -97,7 +111,7 @@ class EvaluationContext:
         self._counts: dict[str, int] = {event: 0 for event in EVENTS}
         self._best_value: float | None = None
         self._best_point: np.ndarray | None = None
-        self._target_hit: dict[float, int | None] = {t: None for t in self._gap_targets}
+        self._target_hit: dict[str, int | None] = {lbl: None for lbl in self._target_labels}
         self._trace: list[EvaluationRecord] = []
         self._termination_reason: str | None = None
         self._event_override: str | None = None
@@ -201,9 +215,9 @@ class EvaluationContext:
         # Target-hit FE (absolute gap to known optimum; sense-agnostic distance).
         if owner._known_optimum is not None:
             gap = abs(value - owner._known_optimum)
-            for target, fe in owner._target_hit.items():
-                if fe is None and gap <= target:
-                    owner._target_hit[target] = owner._evaluations
+            for target, label in zip(owner._gap_targets, owner._target_labels):
+                if owner._target_hit[label] is None and gap <= target:
+                    owner._target_hit[label] = owner._evaluations
         if owner._record_trace or owner._record_evaluations:
             owner._trace.append(
                 EvaluationRecord(
@@ -276,7 +290,7 @@ class EvaluationContext:
 
     def target_hit_evaluations(self) -> dict[str, int | None]:
         owner = self._parent if self._parent is not None else self
-        return {f"target_hit_fe_{t:g}": owner._target_hit.get(t) for t in owner._gap_targets}
+        return {f"target_hit_fe_{lbl}": owner._target_hit[lbl] for lbl in owner._target_labels}
 
     def best_so_far_trace(self) -> list[EvaluationRecord]:
         owner = self._parent if self._parent is not None else self

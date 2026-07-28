@@ -157,7 +157,8 @@ check_bounds <- function(x, bounds_lower, bounds_upper) {
 # (2) Return max function evaluation in addition
 # Performance optimized: in-place modification, metadata-based runmax tracking
 compute_partial_signs <- function(f, x, fx, h_step, bounds_lower, bounds_upper,
-                                  partial_option = "center", use_runmax = TRUE) {
+                                  partial_option = "center", use_runmax = TRUE,
+                                  budget = NULL) {
   d <- length(x)
 
   if (is.null(h_step)) {
@@ -177,11 +178,11 @@ compute_partial_signs <- function(f, x, fx, h_step, bounds_lower, bounds_upper,
 
       # Evaluate plus perturbation
       x[j] <- min(x_j_orig + h_step[j], bounds_upper[j])
-      f_plus <- f(x)
+      f_plus <- eval_fe(budget, f, x, event = "finite_difference")
 
       # Evaluate minus perturbation
       x[j] <- max(x_j_orig - h_step[j], bounds_lower[j])
-      f_minus <- f(x)
+      f_minus <- eval_fe(budget, f, x, event = "finite_difference")
 
       sign_f_diff <- (f_plus > f_minus)
       partial_signs[j] <- sign_f_diff
@@ -208,11 +209,11 @@ compute_partial_signs <- function(f, x, fx, h_step, bounds_lower, bounds_upper,
 
       if (x_j_orig >= bounds_upper[j]) {
         x[j] <- max(x_j_orig - h_step[j], bounds_lower[j])
-        f_perturb <- f(x)
+        f_perturb <- eval_fe(budget, f, x, event = "finite_difference")
         sign_f_diff <- (fx > f_perturb)
       } else {
         x[j] <- min(x_j_orig + h_step[j], bounds_upper[j])
-        f_perturb <- f(x)
+        f_perturb <- eval_fe(budget, f, x, event = "finite_difference")
         sign_f_diff <- (f_perturb > fx)
       }
 
@@ -245,13 +246,13 @@ compute_partial_signs <- function(f, x, fx, h_step, bounds_lower, bounds_upper,
 # Performance optimized: pre-computed h_steps, cached bounds, pre-computed convergence threshold
 SMCO_single <- function(f, bounds_lower, bounds_upper, start_point,
                         bounds_buffer, buffer_rand, iter_max, iter_nstart, iter_boost,
-                        tol_conv, partial_option, use_runmax)
+                        tol_conv, partial_option, use_runmax, budget = NULL)
 {
   d <- length(bounds_lower)
 
   # Initialize
   x_current <- start_point
-  f_current <- f(x_current)
+  f_current <- eval_fe(budget, f, x_current, event = "initialization")
   f_runmax <- f_current
   x_runmax <- x_current
 
@@ -293,9 +294,21 @@ SMCO_single <- function(f, bounds_lower, bounds_upper, start_point,
       h_step <- bounds_diff / (n + 1)
     }
 
+    # Atomic-step pre-check: a center-difference iteration costs 2d partial
+    # evaluations plus 1 iterate evaluation (forward: d + 1).
+    if (!is.null(budget)) {
+      step_cost <- if (partial_option == "center") 2L * d else d
+      step_cost <- step_cost + 1L
+      if (!ctx_can_evaluate(budget, step_cost)) {
+        ctx_set_termination(budget, "evaluation_budget")
+        break
+      }
+    }
+
     partial_sign_results <- compute_partial_signs(f, x_current, f_current, h_step,
                                                   bounds_lower, bounds_upper,
-                                                  partial_option, use_runmax)
+                                                  partial_option, use_runmax,
+                                                  budget = budget)
 
     # Use pre-computed bounds or compute with random deviation
     if (buffer_rand) {
@@ -311,7 +324,7 @@ SMCO_single <- function(f, bounds_lower, bounds_upper, start_point,
     Z <- partial_sign_results$signs * bounds_upper_out + (1 - partial_sign_results$signs) * bounds_lower_out
     S <- S + Z
     x_next <- S / (n + 1)
-    f_next <- f(x_next)
+    f_next <- eval_fe(budget, f, x_next, event = "iterate")
 
     if (use_runmax) {
       # Update the running max record
@@ -352,7 +365,7 @@ SMCO_single <- function(f, bounds_lower, bounds_upper, start_point,
 # Single-start with refinement search
 SMCO_single_refine <- function(f, bounds_lower, bounds_upper, start_point,
                                bounds_buffer, buffer_rand, iter_max, iter_nstart, iter_boost, tol_conv,
-                               refine_search, refine_ratio, partial_option, use_runmax)
+                               refine_search, refine_ratio, partial_option, use_runmax, budget = NULL)
 {
   # Run initial search
   if (refine_search == FALSE) { refine_ratio <- 0 }
@@ -362,13 +375,14 @@ SMCO_single_refine <- function(f, bounds_lower, bounds_upper, start_point,
                         bounds_buffer = bounds_buffer, buffer_rand = buffer_rand,
                         iter_max = iter_max_initial, iter_nstart = iter_nstart, iter_boost = iter_boost,
                         tol_conv = tol_conv, partial_option = partial_option,
-                        use_runmax = use_runmax)
+                        use_runmax = use_runmax, budget = budget)
 
-  # Handle boundary constraints
+  # Handle boundary constraints (clip re-evaluation counted as clip_recheck;
+  # skipped when the budget cannot afford it so x/f stay consistent).
   check_optimal <- check_bounds(result$x_optimal, bounds_lower, bounds_upper)
-  if (check_optimal$is_out) {
+  if (check_optimal$is_out && (is.null(budget) || ctx_can_evaluate(budget, 1L))) {
     x_optimal_in <- check_optimal$x_in
-    f_optimal_in <- f(x_optimal_in)
+    f_optimal_in <- eval_fe(budget, f, x_optimal_in, event = "clip_recheck")
     result$x_optimal <- x_optimal_in
     result$f_optimal <- f_optimal_in
   } else {
@@ -378,9 +392,9 @@ SMCO_single_refine <- function(f, bounds_lower, bounds_upper, start_point,
 
   if (use_runmax) {
     check_runmax <- check_bounds(result$x_runmax, bounds_lower, bounds_upper)
-    if (check_runmax$is_out) {
+    if (check_runmax$is_out && (is.null(budget) || ctx_can_evaluate(budget, 1L))) {
       x_runmax_in <- check_runmax$x_in
-      f_runmax_in <- f(x_runmax_in)
+      f_runmax_in <- eval_fe(budget, f, x_runmax_in, event = "clip_recheck")
       result$x_runmax <- x_runmax_in
       result$f_runmax <- f_runmax_in
     } else {
@@ -391,6 +405,24 @@ SMCO_single_refine <- function(f, bounds_lower, bounds_upper, start_point,
 
   # Run refined search
   if (refine_search) {
+    # Refine restart needs one init evaluation; if the budget cannot afford it,
+    # keep the first-segment result (promoted) and skip the refine segment.
+    if (!is.null(budget) && !ctx_can_evaluate(budget, 1L)) {
+      refine_result <- result
+      if (use_runmax) {
+        refine_result$f_runmax <- f_runmax_in
+        refine_result$x_runmax <- x_runmax_in
+        if (f_runmax_in > f_optimal_in) {
+          refine_result$f_optimal <- f_runmax_in
+          refine_result$x_optimal <- x_runmax_in
+        } else {
+          refine_result$f_optimal <- f_optimal_in
+          refine_result$x_optimal <- x_optimal_in
+        }
+      }
+      return(refine_result)
+    }
+    budget_refine <- if (is.null(budget)) NULL else ctx_scoped(budget, "refine")
     iter_max_refine <- round(iter_max * refine_ratio, digits = 0)
 
     start_point_refine <- if (use_runmax && (f_runmax_in > f_optimal_in)) x_runmax_in else x_optimal_in
@@ -401,7 +433,7 @@ SMCO_single_refine <- function(f, bounds_lower, bounds_upper, start_point,
                                  bounds_buffer = 0, buffer_rand = buffer_rand,
                                  iter_max = iter_max_refine, iter_nstart = iter_nstart, iter_boost = iter_boost_refine,
                                  tol_conv = tol_conv, partial_option = partial_option,
-                                 use_runmax = use_runmax)
+                                 use_runmax = use_runmax, budget = budget_refine)
 
     if (use_runmax) {
       # Handle boundary constraints for refined result
@@ -409,9 +441,9 @@ SMCO_single_refine <- function(f, bounds_lower, bounds_upper, start_point,
       x_refine_runmax <- refine_result$x_runmax
       check_refine_runmax <- check_bounds(x_refine_runmax, bounds_lower, bounds_upper)
 
-      if (check_refine_runmax$is_out) {
+      if (check_refine_runmax$is_out && (is.null(budget_refine) || ctx_can_evaluate(budget_refine, 1L))) {
         x_refine_runmax <- check_refine_runmax$x_in
-        f_refine_runmax <- f(x_refine_runmax)
+        f_refine_runmax <- eval_fe(budget_refine, f, x_refine_runmax, event = "clip_recheck")
       }
 
       if (f_refine_runmax > refine_result$f_optimal) {
@@ -447,7 +479,7 @@ SMCO_single_refine <- function(f, bounds_lower, bounds_upper, start_point,
 # Single-start with/without additional boosted search
 SMCO_single_boost <- function(f, bounds_lower, bounds_upper, start_point,
                               bounds_buffer, buffer_rand, iter_max, iter_nstart, iter_boost, tol_conv,
-                              refine_search, refine_ratio, partial_option, use_runmax)
+                              refine_search, refine_ratio, partial_option, use_runmax, budget = NULL)
 {
 
   # Run regular search with non-boosted starting index n = 1
@@ -455,16 +487,17 @@ SMCO_single_boost <- function(f, bounds_lower, bounds_upper, start_point,
                                       bounds_buffer = bounds_buffer, buffer_rand = buffer_rand,
                                       iter_max = iter_max, iter_nstart = iter_nstart, iter_boost = 0,
                                       tol_conv = tol_conv, refine_search = refine_search, refine_ratio = refine_ratio,
-                                      partial_option = partial_option, use_runmax = use_runmax)
+                                      partial_option = partial_option, use_runmax = use_runmax, budget = budget)
 
   # Run additional boosted search with "boosted" starting index n = iter_boost
   if (iter_boost > 0) {
+    budget_boost <- if (is.null(budget)) NULL else ctx_scoped(budget, "boost")
     refine_result_boost <- SMCO_single_refine(f, bounds_lower, bounds_upper, start_point = start_point,
                                               bounds_buffer = bounds_buffer, buffer_rand = buffer_rand,
                                               iter_max = iter_max, iter_nstart = iter_nstart,
                                               iter_boost = iter_boost,
                                               tol_conv = tol_conv, refine_search = refine_search, refine_ratio = refine_ratio,
-                                              partial_option = partial_option, use_runmax = use_runmax)
+                                              partial_option = partial_option, use_runmax = use_runmax, budget = budget_boost)
 
     if (refine_result_boost$f_optimal > refine_result$f_optimal) {
       refine_result <- refine_result_boost
@@ -539,17 +572,27 @@ SMCO_multi <- function(f, bounds_lower, bounds_upper, start_points = NULL,
     opt_control$iter_nstart <- n_starts
   }
 
+  # Build the FE budget context (NULL when no max_evals -> legacy path).
+  mb <- maybe_build_budget(f, opt_control)
+  if (is.null(mb)) {
+    budget <- NULL
+  } else {
+    budget <- mb$budget
+    opt_control <- mb$opt_control
+  }
+
   verbose <- opt_control$verbose
 
   # Prepare function to process each starting point
   process_start_point <- function(start_point) {
+    if (!is.null(budget) && !ctx_can_evaluate(budget, 1L)) return(NULL)
     SMCO_single_boost(f = f, bounds_lower, bounds_upper, start_point = start_point,
                       bounds_buffer = opt_control$bounds_buffer, buffer_rand = opt_control$buffer_rand,
                       iter_max = opt_control$iter_max, iter_nstart = opt_control$iter_nstart,
                       iter_boost = opt_control$iter_boost,
                       tol_conv = opt_control$tol_conv, refine_search = opt_control$refine_search,
                       refine_ratio = opt_control$refine_ratio, partial_option = opt_control$partial_option,
-                      use_runmax = opt_control$use_runmax)
+                      use_runmax = opt_control$use_runmax, budget = budget)
   }
 
   if (opt_control$use_parallel) {
@@ -585,12 +628,24 @@ SMCO_multi <- function(f, bounds_lower, bounds_upper, start_points = NULL,
     if (verbose) {
       results <- vector("list", n_starts)
       for (i in 1:n_starts) {
-        results[[i]] <- process_start_point(start_points[i, ])
+        res <- process_start_point(start_points[i, ])
+        if (is.null(res)) break
+        results[[i]] <- res
         if (i %% max(1, floor(n_starts / 10)) == 0 || i == n_starts) {
           cat(sprintf("Progress: %d/%d starting points completed (%.0f%%)\n",
                       i, n_starts, 100 * i / n_starts))
         }
       }
+      results <- results[!vapply(results, is.null, logical(1))]
+    } else if (!is.null(budget)) {
+      # Sequential with per-start budget pre-check (apply cannot short-circuit).
+      results <- vector("list", n_starts)
+      for (i in seq_len(n_starts)) {
+        res <- process_start_point(start_points[i, ])
+        if (is.null(res)) break
+        results[[i]] <- res
+      }
+      results <- results[!vapply(results, is.null, logical(1))]
     } else {
       results <- apply(start_points, 1, process_start_point)
     }
@@ -611,18 +666,21 @@ SMCO_multi <- function(f, bounds_lower, bounds_upper, start_points = NULL,
     cat("Best x:", paste(round(best_result$x_optimal, 6), collapse = ", "), "\n")
   }
 
+  out_summary <- list(
+    n_starts = n_starts,
+    mean_iterations = mean(all_iterations),
+    std_values = sd(f_values),
+    endpoints = all_endpoints,
+    values = f_values
+  )
+  if (!is.null(budget)) out_summary$fe <- ctx_summary(budget)
+
   return(list(
     best_result = best_result,
     all_results = results,
     opt_control = opt_control,
-    summary = list(
-      n_starts = n_starts,
-      mean_iterations = mean(all_iterations),
-      std_values = sd(f_values),
-      endpoints = all_endpoints,
-      values = f_values
-    )
-    ))
+    summary = out_summary
+  ))
 }
 
 #####################################
