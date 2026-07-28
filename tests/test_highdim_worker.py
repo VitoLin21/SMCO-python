@@ -150,6 +150,28 @@ def test_run_task_fe_used_observed_equals_budget_cap_path():
     assert res["result_row"]["fe_used"] == res["fe_used"]
 
 
+def test_target_hit_uses_relative_normalized_gap_threshold():
+    # Regression for review M1: target_hit_fe must use the RELATIVE normalized-gap
+    # threshold (best <= f* + target*(initial_ref - f*)), not absolute best <= f*+target.
+    # Contract: if the final normalized_gap reaches a target, that target was hit.
+    inst = generate_instance("Rastrigin", 4, 0, seed=1)
+    starts = _starts(inst)
+    res = run_task(_base_task(fe_budget=600), inst, starts)
+    final_gap = res["normalized_gap"]
+    targets = {"1e-1": 1e-1, "1e-2": 1e-2, "1e-3": 1e-3, "1e-5": 1e-5}
+    for label, target in targets.items():
+        if final_gap <= target:
+            assert res["target_hit_fe"][label] is not None, (
+                f"final normalized_gap={final_gap} reached relative target {label} "
+                f"({target}) but target_hit_fe is None"
+            )
+    # Sanity: the loosest target, if reached at all, is reached no later than tighter ones.
+    present = [(t, res["target_hit_fe"][t]) for t in targets if res["target_hit_fe"][t] is not None]
+    if len(present) >= 2:
+        fes = [fe for _, fe in present]
+        assert fes == sorted(fes)
+
+
 _WORKER_SCRIPT = (
     Path(__file__).resolve().parent.parent / "scripts" / "run_smco_evo_highdim_factorial.py"
 )

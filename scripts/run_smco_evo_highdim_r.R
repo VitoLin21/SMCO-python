@@ -68,6 +68,7 @@ if (is.null(.task_path) || is.null(.instance_root) || is.null(.result_dir)) {
              .run_id, .task$algorithm_id, .task[["function"]], .task$dimension, .task$fe_budget))
 
 .payload <- NULL
+.t0 <- proc.time()
 tryCatch({
   .inst_dir <- file.path(.instance_root, .task$instance_artifact_dir)
   .meta <- jsonlite::fromJSON(file.path(.inst_dir, "metadata.json"))
@@ -116,7 +117,7 @@ tryCatch({
                                   paste(.parts[3:length(.parts)], collapse = "-")
   .family <- switch(.fam_token, "SMCO" = "smco", "SMCO-REFINE" = "smco_refine",
                     "SMCO-BOOST-REFINE" = "smco_boost_refine")
-  .state_sem <- if (.is_evo) switch(.parts[2], "SP" = "state_preserving", "RS" = "restart") else "restart"
+  .state_sem <- if (.is_evo) switch(.parts[2], "SP" = "state_preserving", "RS" = "restart") else NA_character_
 
   if (!.is_evo) {
     if (.family == "smco_refine") { .ctrl$refine_search <- TRUE; .ctrl$refine_ratio <- 0.5 }
@@ -145,9 +146,12 @@ tryCatch({
   .initial_ref <- median(.inst$objective(.starts))
   .norm_gap <- max(.best_min - .known_optimum, 1e-12) / max(.initial_ref - .known_optimum, 1e-12)
 
+  # Targets are RELATIVE to the normalized gap (contract 6 / plan 6.1):
+  # best <= f* + target * (initial_reference - f*).
+  .gap_span <- .initial_ref - .known_optimum
   .target_hit <- list()
   for (.lbl in c("1e-1", "1e-2", "1e-3", "1e-5")) {
-    .target <- .known_optimum + as.numeric(sub("e", "e", .lbl))
+    .target <- .known_optimum + as.numeric(.lbl) * .gap_span
     .fe_hit <- NA
     if (length(.obs$trace_val)) {
       .idx <- which(.obs$trace_val <= .target)[1]
@@ -180,8 +184,8 @@ tryCatch({
     anytime = .anytime,
     termination_reason = .fe_summary$termination_reason %||% "evaluation_budget",
     evaluation_counts_by_event = .fe_summary$evaluation_counts_by_event %||% list(),
-    wall_time_sec = NA_real_,
-    peak_memory_mb = NA_real_,
+    wall_time_sec = as.numeric((proc.time() - .t0)["elapsed"]),
+    peak_memory_mb = NA_real_,  # R has no portable ru_maxrss; merge treats NA as missing
     machine_id = Sys.info()[["nodename"]],
     git_commit = "",
     environment_hash = paste0("R-", R.version$major, ".", R.version$minor),

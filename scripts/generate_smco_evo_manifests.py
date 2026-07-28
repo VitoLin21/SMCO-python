@@ -25,7 +25,6 @@ from smco.highdim_instances import (
     GENERATOR_VERSION,
     DEFAULT_BLOCK_SIZE,
     generate_instance,
-    instance_seed,
     write_instance_artifacts,
 )
 from smco.experiment_manifests import (
@@ -33,7 +32,6 @@ from smco.experiment_manifests import (
     e1_algorithm_configs,
     expand_tasks,
     freeze_manifest,
-    verify_manifest,
     write_manifest,
 )
 

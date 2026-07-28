@@ -181,9 +181,13 @@ def run_task(
     best_min = observer.best_min if observer.trace else initial_reference
     normalized_gap = _gap(best_min, known_optimum, initial_reference)
 
+    # Targets are RELATIVE to the normalized gap (contract 6 / plan 6.1):
+    # target_hit when (best - f*) / (initial_reference - f*) <= target, i.e.
+    # best <= f* + target * (initial_reference - f*).
+    span = initial_reference - known_optimum
     target_hit: dict[str, int | None] = {}
     for label, target in _GAP_TARGETS.items():
-        threshold = known_optimum + target
+        threshold = known_optimum + target * span
         target_hit[label] = _first_fe_below_threshold(observer.trace, threshold)
 
     anytime: list[dict] = []
@@ -194,7 +198,7 @@ def run_task(
         anytime.append(
             {
                 "checkpoint_fe": cp,
-                "fe_used": min(cp, fe_used) if observer.trace else cp,
+                "fe_used": min(cp, fe_used),
                 "best_value": float(best_at),
                 "normalized_gap": _gap(best_at, known_optimum, initial_reference),
             }
