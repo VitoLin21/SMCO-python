@@ -141,7 +141,13 @@ def derive_seed(
     replication: int,
     algorithm_id: str,
 ) -> int:
-    """Stable 32-bit seed derived from the run key (independent of run order)."""
+    """Stable 32-bit seed derived from the run key (independent of run order).
+
+    The key includes ``algorithm_id``, so each algorithm gets its own
+    deterministic stream on the same task — per plan 4.4 this is an
+    per-algorithm independent stream, not a shared common-random-numbers stream
+    (CRN is neither alignable nor needed across heterogeneous optimisers).
+    """
     key = canonical_json(
         {
             "stage": stage,
