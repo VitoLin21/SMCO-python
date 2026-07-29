@@ -82,13 +82,22 @@ t_asym_inverse <- function(z, beta, d) {
 # them from metadata.json when jsonlite is available.
 load_highdim_instance <- function(artifact_dir, function_name, dimension,
                                   asymmetry_strength, objective_scale,
-                                  known_optimum_value) {
+                                  known_optimum_value, n_starts = 8L,
+                                  default_n_starts = 8L) {
   dim <- as.integer(dimension)
   shift <- .read_gz_num(file.path(artifact_dir, "shift.csv.gz"))
   perm <- .read_gz_int(file.path(artifact_dir, "permutation.csv.gz"))
   rot <- read.csv(gzfile(file.path(artifact_dir, "rotation_blocks.csv.gz")),
                   header = FALSE)
-  starts <- .read_gz_matrix(file.path(artifact_dir, "starts.csv.gz"))
+  # Default tier (default_n_starts) lives in starts.csv.gz; other tiers in
+  # starts_n{N}.csv.gz. The caller passes default_n_starts (from metadata) so
+  # this loader stays base-R (no jsonlite dependency).
+  starts_file <- if (as.integer(n_starts) == as.integer(default_n_starts))
+    "starts.csv.gz" else paste0("starts_n", as.integer(n_starts), ".csv.gz")
+  starts_path <- file.path(artifact_dir, starts_file)
+  if (!file.exists(starts_path))
+    stop("no starts artifact for n_starts=", n_starts, " in ", artifact_dir)
+  starts <- .read_gz_matrix(starts_path)
 
   # Rebuild block-diagonal rotation. rot columns are
   # block_start, block_size, local_row, local_col, value (row/col are 0-based).

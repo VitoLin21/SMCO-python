@@ -84,10 +84,13 @@ tryCatch({
          " artifact=", .meta$transform_sha256)
   }
 
+  .default_n <- 8L
+  if (!is.null(.meta$n_starts)) .default_n <- as.integer(.meta$n_starts)
   .inst <- load_highdim_instance(
     .inst_dir, .task[["function"]], as.integer(.task$dimension),
     as.numeric(.meta$asymmetry_strength), as.numeric(.meta$objective_scale),
-    as.numeric(.meta$known_optimum_value)
+    as.numeric(.meta$known_optimum_value),
+    n_starts = as.integer(.task$n_starts), default_n_starts = .default_n
   )
   .starts <- .inst$starts
   .dim <- .inst$dimension
