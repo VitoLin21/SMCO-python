@@ -35,6 +35,7 @@ import numpy as np
 from smco.highdim_instances import load_instance, load_starts
 from smco.highdim_worker import run_task
 from smco.experiment_manifests import load_manifest, verify_manifest
+from smco.confirmatory import enforce_confirmatory, is_run_complete, plan_batch
 
 _THIS_SCRIPT = Path(__file__).resolve()
 _R_WORKER = _THIS_SCRIPT.parent / "run_smco_evo_highdim_r.R"
@@ -209,30 +210,6 @@ def load_manifest_tasks(
     return tasks
 
 
-def is_run_complete(result_dir, run_id) -> bool:
-    """A run is complete only on status=success; infra/timeout must retry."""
-    path = Path(result_dir) / f"{run_id}.json"
-    if not path.exists():
-        return False
-    try:
-        payload = json.loads(path.read_text())
-    except Exception:
-        return False
-    return payload.get("status") == "success"
-
-
-def plan_batch(tasks, result_dir) -> dict:
-    result_dir = Path(result_dir)
-    completed = sum(1 for t in tasks if is_run_complete(result_dir, t["run_id"]))
-    return {
-        "dry_run": False,
-        "n_tasks": len(tasks),
-        "completed": completed,
-        "missing": len(tasks) - completed,
-        "total_fe_budget": sum(int(t["fe_budget"]) for t in tasks),
-    }
-
-
 def _worker_command(task, task_json, instance_root, result_dir, log_dir) -> list[str]:
     common = [
         "--task", str(task_json),
@@ -283,13 +260,19 @@ def run_batch(
     only_dims=None,
     only_run_ids=None,
     log_dir=None,
+    confirmatory=False,
+    selection=None,
 ) -> dict:
     """Dispatch a manifest's tasks to Python/R worker subprocesses.
 
     Resume: tasks whose ``raw/<run_id>.json`` reports ``status=success`` are
     skipped (plan 9 / contract resume semantics). ``wall_time_cap`` per task is
     enforced by the outer subprocess manager (Task 8 process-isolation rule).
+    ``confirmatory=True`` enforces the Gate-F checks (frozen + hash + selection
+    winner in manifest) before dispatching.
     """
+    if confirmatory:
+        enforce_confirmatory(load_manifest(manifest_path), selection=selection)
     tasks = load_manifest_tasks(
         manifest_path, only_language=only_language,
         only_dims=only_dims, only_run_ids=only_run_ids,
@@ -347,6 +330,8 @@ def main(argv=None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="Plan only; dispatch nothing.")
     parser.add_argument("--validate-only", action="store_true", help="Report completed/missing; run nothing.")
     parser.add_argument("--wall-time-cap", type=int, default=None, help="Per-task wall-time cap (seconds).")
+    parser.add_argument("--confirmatory", action="store_true", help="Enforce Gate-F checks (frozen/hash/selection) before dispatch.")
+    parser.add_argument("--selection", default=None, help="selection.json path (used with --confirmatory).")
     args = parser.parse_args(argv)
 
     if args.manifest:
@@ -362,6 +347,8 @@ def main(argv=None) -> int:
             workers=args.workers, resume=args.resume, dry_run=args.dry_run,
             wall_time_cap=args.wall_time_cap, only_language=args.only_language,
             only_dims=args.only_dims, only_run_ids=args.only_run_ids, log_dir=args.log_dir,
+            confirmatory=args.confirmatory,
+            selection=json.loads(Path(args.selection).read_text()) if args.selection else None,
         )
         print(json.dumps(summary, indent=2))
         return 0

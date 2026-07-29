@@ -252,6 +252,79 @@ def expand_tasks(
     return tasks
 
 
+# --- comparison baseline tasks (E3 / E1B; algorithm is a baseline name, not a SMCO algorithm_id) ---
+def baseline_run_id(task: dict) -> str:
+    """``run_id = 'b' + sha256(canonical_json(task_subset))[:16]`` for baselines."""
+    digest = hashlib.sha256(canonical_json(
+        {
+            "stage": task["stage"],
+            "suite": task["suite"],
+            "function": task["function"],
+            "dimension": int(task["dimension"]),
+            "instance": int(task["instance"]),
+            "algorithm": task["algorithm"],
+            "fe_budget": int(task["fe_budget"]),
+            "checkpoints": [int(c) for c in task["checkpoints"]],
+            "seed": int(task["seed"]),
+        }
+    ).encode("utf-8")).hexdigest()
+    return "b" + digest[:16]
+
+
+def build_baseline_task(
+    stage, suite, function, dim, instance, *, algorithm, fe_budget, checkpoints, seed,
+    instance_artifact_dir=None, instance_hash=None, start_points_hash=None,
+) -> dict:
+    task = {
+        "schema_version": SCHEMA_VERSION,
+        "stage": stage,
+        "suite": suite,
+        "function": function,
+        "dimension": int(dim),
+        "instance": int(instance),
+        "algorithm": algorithm,
+        "fe_budget": int(fe_budget),
+        "checkpoints": [int(c) for c in checkpoints],
+        "seed": int(seed),
+        "instance_artifact_dir": instance_artifact_dir,
+        "instance_hash": instance_hash,
+        "start_points_hash": start_points_hash,
+    }
+    task["run_id"] = baseline_run_id(task)
+    return task
+
+
+def expand_baseline_tasks(
+    stage, suite, functions, dims, n_instances, baselines, *,
+    fe_budget_per_d, checkpoints_per_d, instance_index=None,
+) -> list[dict]:
+    tasks: list[dict] = []
+    for function in functions:
+        for dim in dims:
+            dim = int(dim)
+            fe_budget = int(fe_budget_per_d) * dim
+            checkpoints = [int(c) * dim for c in checkpoints_per_d]
+            for instance in range(n_instances):
+                provenance: dict = {}
+                if instance_index is not None:
+                    entry = instance_index.get((function, dim, instance))
+                    if entry is not None:
+                        provenance = {
+                            "instance_artifact_dir": entry.get("artifact_dir"),
+                            "instance_hash": entry.get("transform_sha256"),
+                            "start_points_hash": entry.get("start_points_hash"),
+                        }
+                for algorithm in baselines:
+                    seed = derive_seed(stage, suite, function, dim, instance, 0, algorithm)
+                    tasks.append(
+                        build_baseline_task(
+                            stage, suite, function, dim, instance, algorithm=algorithm,
+                            fe_budget=fe_budget, checkpoints=checkpoints, seed=seed, **provenance,
+                        )
+                    )
+    return tasks
+
+
 def manifest_sha256(doc: dict) -> str:
     """SHA-256 over the manifest content, excluding the hash field itself."""
     payload = {k: v for k, v in doc.items() if k != "manifest_sha256"}
