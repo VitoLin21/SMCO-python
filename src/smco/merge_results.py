@@ -135,9 +135,145 @@ def baseline_row_from_outcome(outcome: dict, task: dict, manifest_id: str = "") 
     }
 
 
+def resolve_supersedes(rows: list[dict]) -> tuple[list[dict], set[str]]:
+    """Split rows into (valid, superseded_run_ids).
+
+    A row whose ``supersedes_run_id`` is a real run_id removes that run_id from
+    the valid set (it stays in all_attempts).
+    """
+    superseded: set[str] = set()
+    for row in rows:
+        sup = row.get("supersedes_run_id")
+        if sup and sup != NONE_TOKEN:
+            superseded.add(sup)
+    valid = [r for r in rows if r["run_id"] not in superseded]
+    return valid, superseded
+
+
+def _identity_key(row: dict) -> tuple:
+    """Identity (excluding run_id) — same key => duplicate unless supersedes."""
+    return (
+        row["function"], int(row["dimension"]), int(row["instance"]),
+        row["algorithm_id"], row["language"], row["state_semantics"],
+        row["evolution_strategy"], int(row["seed"]),
+    )
+
+
+def _check(name: str, rows: list[dict], ok: bool, errors: list[str]) -> dict:
+    return {"name": name, "passed": ok, "n": len(rows), "errors": errors}
+
+
+def audit_payloads(rows: list[dict], task_index: dict[str, dict]) -> dict:
+    """Run the 11 provenance checks; return {passed, failed_checks, checks, n_rows}.
+
+    ``passed=False`` does not crash the merge — the analysis layer (Task 12)
+    refuses to build primary tables when the audit fails.
+    """
+    checks: list[dict] = []
+
+    # 1. run_id uniqueness
+    ids = [r["run_id"] for r in rows]
+    dup_ids = sorted({i for i in ids if ids.count(i) > 1})
+    checks.append(_check("run_id_uniqueness", rows, not dup_ids,
+                         [f"duplicate run_id: {i}" for i in dup_ids]))
+
+    # 2. manifest coverage (orphans: run_id not in task_index)
+    orphans = [r["run_id"] for r in rows if r["run_id"] not in task_index]
+    checks.append(_check("manifest_coverage", rows, not orphans,
+                         [f"run_id not in any manifest: {o}" for o in orphans]))
+
+    # 3. supersedes target exists
+    known = set(ids) | set(task_index)
+    dangling = [r["supersedes_run_id"] for r in rows
+                if r.get("supersedes_run_id") not in (NONE_TOKEN, None)
+                and r["supersedes_run_id"] not in known]
+    checks.append(_check("supersedes_resolvable", rows, not dangling,
+                         [f"supersedes unknown run_id: {d}" for d in dangling]))
+
+    # 4. configuration_hash consistent with task (SMCO only)
+    bad_cfg = []
+    for r in rows:
+        t = task_index.get(r["run_id"])
+        if t and "configuration_hash" in t and r.get("configuration_hash") != t["configuration_hash"]:
+            bad_cfg.append(r["run_id"])
+    checks.append(_check("configuration_hash_consistent", rows, not bad_cfg,
+                         [f"hash mismatch: {b}" for b in bad_cfg]))
+
+    # 5. FE <= budget
+    over = [r["run_id"] for r in rows if int(r["fe_used"]) > int(r["fe_budget"])]
+    checks.append(_check("fe_within_budget", rows, not over,
+                         [f"fe_over_budget: {o}" for o in over]))
+
+    # 6. objective direction
+    wrong_dir = [r["run_id"] for r in rows if r.get("objective_sense") != "minimize"]
+    checks.append(_check("objective_direction", rows, not wrong_dir,
+                         [f"non-minimize: {w}" for w in wrong_dir]))
+
+    # 7. known_optimum / gap sanity (best >= optimum - tol in minimisation)
+    bad_gap = []
+    for r in rows:
+        try:
+            if r["best_value"] < r["known_optimum"] - 1e-6:
+                bad_gap.append(r["run_id"])
+        except TypeError:
+            pass  # NaN best (infra/timeout) stays in the denominator, not a gap error
+    checks.append(_check("gap_sanity", rows, not bad_gap,
+                         [f"best<optimum: {b}" for b in bad_gap]))
+
+    # 8. start_points_hash consistent within (function,dim,instance)
+    by_inst: dict[tuple, set] = {}
+    for r in rows:
+        key = (r["function"], int(r["dimension"]), int(r["instance"]))
+        by_inst.setdefault(key, set()).add(r.get("start_points_hash"))
+    clash = [f"{k}" for k, v in by_inst.items() if len(v) > 1]
+    checks.append(_check("start_points_hash_consistent", rows, not clash,
+                         [f"instance has multiple starts hashes: {c}" for c in clash]))
+
+    # 9. non-EVO rows not duplicated by strategy + identity duplicates
+    bad_strategy = [r["run_id"] for r in rows
+                    if r["evolutionary"] == "false" and r["evolution_strategy"] != NONE_TOKEN]
+    seen: dict[tuple, list[str]] = {}
+    for r in rows:
+        seen.setdefault(_identity_key(r), []).append(r["run_id"])
+    dups = [rids for rids in seen.values() if len(rids) > 1]
+    checks.append(_check("no_pseudo_duplicates", rows, not bad_strategy and not dups,
+                         [f"base row has strategy: {b}" for b in bad_strategy]
+                         + [f"identity duplicated: {rids}" for rids in dups]))
+
+    # 10. confirmatory seed equals derive_seed(stage,...,algorithm)
+    bad_seed = []
+    for r in rows:
+        t = task_index.get(r["run_id"])
+        if not t or t.get("stage") not in _CONFIRMATORY_STAGES:
+            continue
+        algo = t.get("algorithm_id") or t.get("algorithm")
+        expected = derive_seed(t["stage"], t.get("suite", "synthetic_highdim"),
+                               t["function"], int(t["dimension"]), int(t["instance"]),
+                               int(t.get("replication", 0)), algo)
+        if int(r["seed"]) != int(expected):
+            bad_seed.append(r["run_id"])
+    checks.append(_check("seed_matches_derive_seed", rows, not bad_seed,
+                         [f"seed mismatch (possible dev seed): {b}" for b in bad_seed]))
+
+    # 11. statuses are all in the contract vocabulary (kept in the denominator)
+    bad_status = [r["run_id"] for r in rows if r["status"] not in STATUSES]
+    checks.append(_check("status_vocabulary", rows, not bad_status,
+                         [f"unknown status: {b}" for b in bad_status]))
+
+    failed = [c["name"] for c in checks if not c["passed"]]
+    return {
+        "passed": not failed,
+        "failed_checks": failed,
+        "checks": checks,
+        "n_rows": len(rows),
+    }
+
+
 __all__ = [
     "classify_task",
     "build_task_index",
     "smco_row_from_outcome",
     "baseline_row_from_outcome",
+    "resolve_supersedes",
+    "audit_payloads",
 ]

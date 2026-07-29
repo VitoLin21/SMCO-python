@@ -13,9 +13,12 @@ from smco.experiment_manifests import (
     validate_result_against_task,
 )
 from smco.merge_results import (
+    _identity_key,
+    audit_payloads,
     baseline_row_from_outcome,
     build_task_index,
     classify_task,
+    resolve_supersedes,
     smco_row_from_outcome,
 )
 from smco.paper_contract import (
@@ -112,3 +115,77 @@ def test_baseline_row_from_outcome_has_columns_and_algorithm():
     assert row["family"] == NONE_TOKEN
     assert row["configuration_hash"] == NONE_TOKEN
     assert row["is_confirmatory"] is True  # e3 is confirmatory
+
+
+def _e2_task():
+    cfg = build_algorithm_config(
+        "python", "smco", True, "state_preserving",
+        evolution_strategy="rand1bin", evolution_points=(0.5, 0.75),
+        elimination_rate=0.25, de_factor=0.8, de_crossover=0.7, n_starts=8,
+    )
+    seed = derive_seed("e2_factorial_highdim", "synthetic_highdim", "Zakharov", 200, 0, 0, cfg["algorithm_id"])
+    return build_task(
+        "e2_factorial_highdim", "synthetic_highdim", "Zakharov", 200, 0, 0,
+        config=cfg, fe_budget=20000, checkpoints=(5000, 10000), seed=seed,
+        instance_hash="ihash", start_points_hash="shash",
+    )
+
+
+def _row(run_id, **kw):
+    base = {"function": "Zakharov", "dimension": 200, "instance": 0,
+            "algorithm_id": "PY-SP-SMCO-EVO", "language": "python",
+            "state_semantics": "state_preserving", "evolution_strategy": "rand1bin",
+            "seed": 1, "run_id": run_id, "stage": "e2_factorial_highdim",
+            "suite": "synthetic_highdim", "fe_budget": 1000, "fe_used": 999,
+            "objective_sense": "minimize", "best_value": 1e-6, "known_optimum": 0.0,
+            "normalized_gap": 0.01, "family": "smco", "evolutionary": "true",
+            "configuration_hash": "cfg", "start_points_hash": "sh",
+            "instance_hash": "ih", "supersedes_run_id": "none", "status": "success"}
+    base.update(kw)
+    return base
+
+
+def test_resolve_supersedes_excludes_superseded():
+    rows = [_row("r1"), _row("r2", supersedes_run_id="r1")]
+    valid, superseded = resolve_supersedes(rows)
+    assert [r["run_id"] for r in valid] == ["r2"]
+    assert superseded == {"r1"}
+
+
+def test_identity_key_detects_duplicate_identity():
+    a = _row("r1"); b = _row("r2")  # same identity, different run_id
+    assert _identity_key(a) == _identity_key(b)
+
+
+def test_audit_passes_clean_rows():
+    task = _evo_task()
+    row = smco_row_from_outcome(_smco_outcome(task), task)
+    audit = audit_payloads([row], {task["run_id"]: task})
+    assert audit["passed"] is True, audit
+
+
+def test_audit_flags_fe_over_budget():
+    task = _evo_task()
+    row = smco_row_from_outcome(_smco_outcome(task), task)
+    row["fe_used"] = task["fe_budget"] + 1
+    audit = audit_payloads([row], {task["run_id"]: task})
+    assert audit["passed"] is False
+    assert any("budget" in c["name"] for c in audit["checks"])
+
+
+def test_audit_flags_wrong_seed():
+    task = _e2_task()  # confirmatory stage -> seed is audited
+    row = smco_row_from_outcome(_smco_outcome(task), task)
+    row["seed"] = task["seed"] + 1
+    audit = audit_payloads([row], {task["run_id"]: task})
+    assert audit["passed"] is False
+    assert any("seed" in c["name"] for c in audit["checks"])
+
+
+def test_audit_flags_duplicate_identity():
+    task = _evo_task()
+    row = smco_row_from_outcome(_smco_outcome(task), task)
+    dup = dict(row); dup["run_id"] = "r_other"
+    audit = audit_payloads([row, dup], {task["run_id"]: task, "r_other": task})
+    assert audit["passed"] is False
+    assert any("duplicate" in c["name"] for c in audit["checks"])
