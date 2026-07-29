@@ -188,27 +188,30 @@ tryCatch({
     best_value = .best_min,
     known_optimum = .known_optimum,
     normalized_gap = .norm_gap,
+    objective_sense = "minimize",
     target_hit_fe = .target_hit,
     anytime = .anytime,
+    best_so_far_trace = mapply(c, .obs$trace_fe, .obs$trace_val, SIMPLIFY = FALSE),
     termination_reason = .fe_summary$termination_reason %||% "evaluation_budget",
-    evaluation_counts_by_event = .fe_summary$evaluation_counts_by_event %||% list(),
+    fe_counts_by_event = as.list(.fe_summary$evaluation_counts_by_event %||% list()),
     wall_time_sec = as.numeric((proc.time() - .t0)["elapsed"]),
-    peak_memory_mb = NA_real_,  # R has no portable ru_maxrss; merge treats NA as missing
+    peak_memory_mb = NA_real_,  # R has no portable ru_maxrss; serialised as null
     machine_id = Sys.info()[["nodename"]],
     git_commit = "",
     environment_hash = paste0("R-", R.version$major, ".", R.version$minor),
-    task = .task
+    task = .task,
+    algorithm_id = .task$algorithm_id,
+    supersedes_run_id = "none"
   )
 }, error = function(e) {
   .say(sprintf("[r-worker] INFRA_FAILURE %s: %s", class(e)[1], conditionMessage(e)))
   .payload <<- list(run_id = .run_id, status = "infra_failure",
-                    failure_reason = paste0(class(e)[1], ": ", conditionMessage(e)),
-                    result_row = NULL)
+                    failure_reason = paste0(class(e)[1], ": ", conditionMessage(e)))
 })
 
 # atomic write
 .tmp <- file.path(.result_dir, paste0(.run_id, ".json.tmp"))
-jsonlite::write_json(.payload, .tmp, auto_unbox = TRUE, pretty = TRUE, null = "null")
+jsonlite::write_json(.payload, .tmp, auto_unbox = TRUE, pretty = TRUE, null = "null", na = "null")
 file.rename(.tmp, file.path(.result_dir, paste0(.run_id, ".json")))
 .say(sprintf("[r-worker] done status=%s", .payload$status))
 close(.log_con)
