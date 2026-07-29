@@ -171,12 +171,18 @@ def run_baseline_task(
         "fe_used": fe_used,
         "best_value": float(best_min),
         "normalized_gap": normalized_gap,
+        "objective_sense": "minimize",
         "target_hit_fe": target_hit,
         "anytime": anytime,
+        "best_so_far_trace": [[int(fe), float(val)] for fe, val in observer.trace],
+        "termination_reason": "evaluation_budget",
+        "fe_counts_by_event": {},
         "wall_time_sec": wall_time,
+        "peak_memory_mb": None,
         "machine_id": machine_id,
         "git_commit": git_commit,
         "environment_hash": environment_hash,
+        "supersedes_run_id": NONE_TOKEN,
     }
 
 

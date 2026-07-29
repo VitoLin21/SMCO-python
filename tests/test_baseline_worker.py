@@ -16,6 +16,7 @@ from smco.experiment_manifests import (
     freeze_manifest,
 )
 from smco.highdim_instances import generate_instance, write_instance_artifacts
+from smco.paper_contract import validate_outcome
 
 _BASELINES = (
     Path(__file__).resolve().parent.parent / "scripts" / "run_smco_evo_highdim_baselines.py"
@@ -48,6 +49,11 @@ def test_run_baseline_task_smoke(algorithm_name):
     assert res["best_value"] >= -1e-9  # Rastrigin minimisation is >= 0
     assert set(res["target_hit_fe"]) == {"1e-1", "1e-2", "1e-3", "1e-5"}
     assert [a["checkpoint_fe"] for a in res["anytime"]] == [50, 100, 200]
+    assert isinstance(res["best_so_far_trace"], list)
+    assert res["supersedes_run_id"] == "none"
+    assert res["termination_reason"] == "evaluation_budget"
+    assert res["fe_counts_by_event"] == {}
+    assert res["peak_memory_mb"] is None
 
 
 def test_run_baseline_task_fe_hard_stop_on_tiny_budget():
@@ -99,6 +105,9 @@ def test_run_baseline_batch_end_to_end(tmp_path):
         assert out.exists()
         payload = json.loads(out.read_text())
         assert payload["status"] in ("success", "algorithm_failure", "infra_failure")
+        if payload["status"] == "success":
+            assert validate_outcome(payload) == []
+            assert payload["task"]["algorithm"] in {"GenSA", "DE"}
 
     # resume: completed runs are skipped on the second pass
     summary2 = cli.run_baseline_batch(mp, tmp_path / "raw", tmp_path / "inst", workers=2)

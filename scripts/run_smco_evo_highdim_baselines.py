@@ -92,6 +92,7 @@ def run_baseline_file(task_path, *, instance_root, result_dir, log_dir=None,
         return 1
 
     payload["run_id"] = run_id
+    payload["task"] = task
     _atomic_write_json(result_dir / f"{run_id}.json", payload)
     say(f"[baseline] done status={payload['status']} fe_used={payload['fe_used']} best={payload['best_value']:.6e}")
     log_handle.close()
