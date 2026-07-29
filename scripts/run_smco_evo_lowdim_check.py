@@ -1,20 +1,27 @@
 #!/usr/bin/env python
-"""E5 low-dimensional non-degradation check (Task 10). REQUIRES cocoex.
+"""E5 low-dimensional non-degradation check (Task 10 / E5).
 
-Checks that the high-dimensional E1 winner does not systematically degrade at
-low dimension: COCO ``bbob`` (all 24 functions, d in {5, 20}, official
-instances 1--5), winner vs matched non-EVO base only, B_max = 2000*d FE
-(experiment plan, E5). Low-dim results go to the supplement; unless severely
-degraded they do not overturn the high-dim winner.
-
-Like run_smco_evo_bbob_largescale.py this is a contract skeleton gated on the
-optional ``cocoex`` dependency; it exits with code 2 when cocoex is absent.
+Runs the frozen E1 winner + matched non-EVO base on COCO ``bbob``
+(24 functions, d in {5, 20}, official instances 1--5) under B_max = 2000*d FE,
+and writes a supplement CSV (per func*dim*instance*algorithm metrics +
+winner-vs-base summary). Unless severely degraded, low-dim results do not
+overturn the high-dim winner. Requires cocoex (``pip install coco-experiment``).
 """
-
 from __future__ import annotations
 
 import argparse
+import csv
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
+import cocoex  # noqa: E402
+
+from smco.coco_runner import run_on_problem  # noqa: E402
+from smco.paper_contract import parse_algorithm_id  # noqa: E402
+
+_FAM_TOKEN = {"smco": "SMCO", "smco_refine": "SMCO-REFINE", "smco_boost_refine": "SMCO-BOOST-REFINE"}
 
 
 def _have_cocoex() -> bool:
@@ -25,9 +32,81 @@ def _have_cocoex() -> bool:
         return False
 
 
+def to_py(winner: str) -> str:
+    """Normalise an R-winner to its Py equivalent (E5 runs Python cocoex)."""
+    parsed = parse_algorithm_id(winner)
+    fam = _FAM_TOKEN[parsed["family"]]
+    if not parsed["evolutionary"]:
+        return f"PY-BASE-{fam}"
+    slot = {"state_preserving": "SP", "restart": "RS"}[parsed["state_semantics"]]
+    return f"PY-{slot}-{fam}-EVO"
+
+
+def matched_base(winner_py: str) -> str:
+    parsed = parse_algorithm_id(winner_py)
+    return f"PY-BASE-{_FAM_TOKEN[parsed['family']]}"
+
+
+def run_lowdim(*, winner, dims, instances, fe_budget_per_d, result_dir) -> dict:
+    """Run winner + matched base over the bbob suite; write supplement CSVs."""
+    result_dir = Path(result_dir)
+    result_dir.mkdir(parents=True, exist_ok=True)
+    winner_py = to_py(winner)
+    base = matched_base(winner_py)
+    suite = cocoex.Suite(
+        "bbob",
+        f"instances:{'-'.join(str(i) for i in instances)}",
+        f"dimensions:{','.join(str(d) for d in dims)}",
+    )
+
+    rows: list[dict] = []
+    for algo in [winner_py, base]:
+        observer = cocoex.Observer("bbob", f"result_folder: {result_dir / 'cocoex' / algo}")
+        for problem in suite:
+            rows.append(run_on_problem(
+                problem, algorithm_id=algo,
+                fe_budget=fe_budget_per_d * int(problem.dimension),
+                observer=observer,
+            ))
+
+    _write_csv(result_dir / "lowdim_degradation.csv", rows,
+               ("function", "dimension", "instance", "algorithm_id",
+                "best_observed_fvalue1", "final_target_hit", "evaluations"))
+    _write_summary(result_dir / "lowdim_summary.csv", rows, winner_py, base)
+    return {"n_runs": len(rows), "winner": winner_py, "base": base}
+
+
+def _write_csv(path, rows, fields):
+    with open(path, "w", newline="") as h:
+        w = csv.DictWriter(h, fieldnames=list(fields))
+        w.writeheader()
+        for r in rows:
+            w.writerow({c: r.get(c, "") for c in fields})
+
+
+def _write_summary(path, rows, winner, base):
+    # Per (function, dimension): winner/base final_target_hit + best.
+    by_key: dict[tuple, dict] = {}
+    for r in rows:
+        key = (int(r["function"]), int(r["dimension"]))
+        by_key.setdefault(key, {})[r["algorithm_id"]] = r
+    out = []
+    for (func, dim), algos in sorted(by_key.items()):
+        w = algos.get(winner); b = algos.get(base)
+        out.append({
+            "function": func, "dimension": dim,
+            "winner_target_hit": w["final_target_hit"] if w else "",
+            "base_target_hit": b["final_target_hit"] if b else "",
+            "winner_best": w["best_observed_fvalue1"] if w else "",
+            "base_best": b["best_observed_fvalue1"] if b else "",
+        })
+    _write_csv(path, out, ("function", "dimension", "winner_target_hit",
+                           "base_target_hit", "winner_best", "base_best"))
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--winner", required=True, help="Frozen E1 winner algorithm_id.")
+    parser.add_argument("--winner", required=True, help="Frozen E1 winner algorithm_id (Py or R; R auto-converted).")
     parser.add_argument("--dims", nargs="+", type=int, default=[5, 20])
     parser.add_argument("--instances", nargs="+", type=int, default=[1, 2, 3, 4, 5])
     parser.add_argument("--fe-budget-per-d", type=int, default=2000)
@@ -35,16 +114,15 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     if not _have_cocoex():
-        print(
-            "ERROR: cocoex not installed. Install with: pip install cocoex cocopp\n"
-            "Then implement bbob suite dispatch (winner vs matched base only).",
-            file=sys.stderr,
-        )
+        print("ERROR: cocoex not installed. Install with: pip install coco-experiment", file=sys.stderr)
         return 2
 
-    # TODO(cocoex): iterate bbob suite; run winner + matched base per problem
-    # under fe_budget_per_d*dim; emit supplement low-dim degradation table.
-    raise NotImplementedError("cocoex present but low-dim dispatch not yet implemented")
+    summary = run_lowdim(
+        winner=args.winner, dims=args.dims, instances=args.instances,
+        fe_budget_per_d=args.fe_budget_per_d, result_dir=args.result_dir)
+    print(f"E5 lowdim: {summary['n_runs']} runs ({summary['winner']} vs {summary['base']}) "
+          f"-> {args.result_dir}/lowdim_degradation.csv")
+    return 0
 
 
 if __name__ == "__main__":

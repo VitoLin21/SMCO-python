@@ -50,3 +50,21 @@ def test_run_on_problem_evo_smoke():
     res = run_on_problem(p, algorithm_id="PY-SP-SMCO-EVO", fe_budget=200)
     assert res["evaluations"] <= 200
     assert res["algorithm_id"] == "PY-SP-SMCO-EVO"
+
+
+def test_lowdim_runner_small_subset(tmp_path):
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        "lowdim_cli", Path("scripts/run_smco_evo_lowdim_check.py"))
+    cli = importlib.util.module_from_spec(spec); spec.loader.exec_module(cli)
+    summary = cli.run_lowdim(
+        winner="PY-SP-SMCO-EVO", dims=[5], instances=[1],
+        fe_budget_per_d=200, result_dir=tmp_path)
+    # 24 bbob functions x 1 instance x d5 x {winner, base} = 48 rows
+    import csv
+    rows = list(csv.DictReader(open(tmp_path / "lowdim_degradation.csv")))
+    assert len(rows) == 24 * 1 * 1 * 2
+    assert {r["algorithm_id"] for r in rows} == {"PY-SP-SMCO-EVO", "PY-BASE-SMCO"}
+    assert all(int(r["evaluations"]) <= 200 * 5 for r in rows)
+    assert (tmp_path / "lowdim_summary.csv").exists()
