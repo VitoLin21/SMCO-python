@@ -99,7 +99,22 @@ def run_on_problem(
         control["de_crossover"] = _DEFAULT_DE_CROSSOVER
         control["state_semantics"] = parsed["state_semantics"]
 
-    algorithm(lambda x: -problem(x), problem.lower_bounds, problem.upper_bounds, starts, **control)
+    lower = problem.lower_bounds
+    upper = problem.upper_bounds
+
+    def objective(x):
+        # Clip probe points to the cocoex bounds (cocoex extrapolates outside)
+        # and penalise non-finite probe values so a diverging trajectory cannot
+        # register a misleading "best" via cocoex's NaN handling.
+        x = np.clip(np.asarray(x, dtype=float), lower, upper)
+        if not np.all(np.isfinite(x)):
+            return -1e10
+        v = float(problem(x))
+        if not np.isfinite(v):
+            return -1e10
+        return -v
+
+    algorithm(objective, lower, upper, starts, **control)
 
     return {
         "algorithm_id": algorithm_id,
