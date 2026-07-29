@@ -152,11 +152,15 @@ def resolve_supersedes(rows: list[dict]) -> tuple[list[dict], set[str]]:
 
 
 def _identity_key(row: dict) -> tuple:
-    """Identity (excluding run_id) — same key => duplicate unless supersedes."""
+    """Identity (excluding run_id) — same key => duplicate unless supersedes.
+
+    n_starts is included so the E6.1 start-count tiers (same algorithm_id/seed,
+    different n_starts) are distinct, not flagged as pseudo-duplicates.
+    """
     return (
         row["function"], int(row["dimension"]), int(row["instance"]),
         row["algorithm_id"], row["language"], row["state_semantics"],
-        row["evolution_strategy"], int(row["seed"]),
+        row["evolution_strategy"], int(row["seed"]), int(row["n_starts"]),
     )
 
 

@@ -137,7 +137,7 @@ def _row(run_id, **kw):
     base = {"function": "Zakharov", "dimension": 200, "instance": 0,
             "algorithm_id": "PY-SP-SMCO-EVO", "language": "python",
             "state_semantics": "state_preserving", "evolution_strategy": "rand1bin",
-            "seed": 1, "run_id": run_id, "stage": "e2_factorial_highdim",
+            "seed": 1, "n_starts": 8, "run_id": run_id, "stage": "e2_factorial_highdim",
             "suite": "synthetic_highdim", "fe_budget": 1000, "fe_used": 999,
             "objective_sense": "minimize", "best_value": 1e-6, "known_optimum": 0.0,
             "normalized_gap": 0.01, "family": "smco", "evolutionary": "true",
@@ -239,3 +239,8 @@ def test_merge_reports_missing_runs(tmp_path):
     missing = list(csv.DictReader(open(tmp_path / "merged" / "missing_runs.csv")))
     assert len(missing) == 1
     assert missing[0]["run_id"] == task["run_id"]
+
+
+def test_identity_key_distinguishes_n_starts():
+    a = _row("r1"); b = _row("r2", n_starts=16)
+    assert _identity_key(a) != _identity_key(b)
