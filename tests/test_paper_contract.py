@@ -175,3 +175,57 @@ def test_validate_result_row_flags_algorithm_id_mismatch():
     bad = _good_row(algorithm_id="PY-BASE-SMCO")  # row claims EVO though
     errors = pc.validate_result_row(bad)
     assert any("algorithm_id mismatch" in e for e in errors)
+
+
+def _good_outcome():
+    return {
+        "run_id": "rabc123def456abcd",
+        "status": "success",
+        "failure_reason": "none",
+        "fe_used": 100,
+        "fe_budget": 200,
+        "best_value": 1e-6,
+        "known_optimum": 0.0,
+        "normalized_gap": 0.01,
+        "target_hit_fe": {"1e-1": 50, "1e-2": None, "1e-3": None, "1e-5": None},
+        "anytime": [{"checkpoint_fe": 200, "fe_used": 100, "best_value": 1e-6, "normalized_gap": 0.01}],
+        "best_so_far_trace": [[10, 1e-1], [50, 1e-6]],
+        "termination_reason": "evaluation_budget",
+        "fe_counts_by_event": {"initialization": 1},
+        "wall_time_sec": 0.5,
+        "peak_memory_mb": 12.0,
+        "machine_id": "host",
+        "git_commit": "abc",
+        "environment_hash": "env",
+        "task": {"run_id": "rabc123def456abcd"},
+        "algorithm_id": "PY-SP-SMCO-EVO",
+        "supersedes_run_id": "none",
+    }
+
+
+def test_validate_outcome_passes_good_payload():
+    assert pc.validate_outcome(_good_outcome()) == []
+
+
+def test_validate_outcome_detects_missing_field():
+    payload = _good_outcome()
+    del payload["best_so_far_trace"]
+    errors = pc.validate_outcome(payload)
+    assert errors and any("best_so_far_trace" in e for e in errors)
+
+
+def test_validate_outcome_detects_bad_status():
+    payload = _good_outcome()
+    payload["status"] = "great"
+    assert pc.validate_outcome(payload) != []
+
+
+def test_validate_outcome_detects_wrong_types():
+    p = _good_outcome(); p["target_hit_fe"] = "x"
+    assert any("target_hit_fe" in e for e in pc.validate_outcome(p))
+    p = _good_outcome(); p["best_so_far_trace"] = "x"
+    assert any("best_so_far_trace" in e for e in pc.validate_outcome(p))
+    p = _good_outcome(); p["fe_counts_by_event"] = "x"
+    assert any("fe_counts_by_event" in e for e in pc.validate_outcome(p))
+    p = _good_outcome(); p["task"] = "x"
+    assert any("task" in e for e in pc.validate_outcome(p))

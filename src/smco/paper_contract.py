@@ -238,6 +238,60 @@ RESULT_COLUMNS: tuple[str, ...] = (
 )
 
 
+# --- unified outcome payload (worker -> raw/<run_id>.json) ---
+OUTCOME_FIELDS: tuple[str, ...] = (
+    "run_id",
+    "status",
+    "failure_reason",
+    "fe_used",
+    "fe_budget",
+    "best_value",
+    "known_optimum",
+    "normalized_gap",
+    "target_hit_fe",
+    "anytime",
+    "best_so_far_trace",
+    "termination_reason",
+    "fe_counts_by_event",
+    "wall_time_sec",
+    "peak_memory_mb",
+    "machine_id",
+    "git_commit",
+    "environment_hash",
+    "task",
+    "algorithm_id",
+    "supersedes_run_id",
+)
+
+
+def validate_outcome(payload: Mapping[str, Any]) -> list[str]:
+    """Return contract violations for an outcome payload (empty == ok).
+
+    Only success/algorithm_failure outcomes must pass; infra_failure / timeout
+    runner placeholders (``{run_id, status, failure_reason}``) are tolerated by
+    the merge step and need not pass this check.
+    """
+    errors: list[str] = []
+    for field in OUTCOME_FIELDS:
+        if field not in payload:
+            errors.append(f"missing outcome field: {field}")
+    if errors:
+        return errors
+    if payload["status"] not in STATUSES:
+        errors.append(f"status not in {STATUSES}")
+    if not isinstance(payload["target_hit_fe"], dict):
+        errors.append("target_hit_fe must be a dict")
+    if not isinstance(payload["anytime"], list):
+        errors.append("anytime must be a list")
+    if not isinstance(payload["best_so_far_trace"], list):
+        errors.append("best_so_far_trace must be a list")
+    if not isinstance(payload["fe_counts_by_event"], dict):
+        errors.append("fe_counts_by_event must be a dict")
+    if not isinstance(payload["task"], dict):
+        errors.append("task must be an embedded dict")
+    return errors
+
+
 def validate_result_row(row: Mapping[str, Any]) -> list[str]:
     """Return a list of contract violations for a result row (empty == ok)."""
     errors: list[str] = []
@@ -308,4 +362,6 @@ __all__ = [
     "compute_configuration_hash",
     "format_cfg_float",
     "validate_result_row",
+    "OUTCOME_FIELDS",
+    "validate_outcome",
 ]
