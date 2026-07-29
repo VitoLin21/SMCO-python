@@ -164,6 +164,7 @@ def run_baseline_task(
         "stage": stage,
         "function": instance.function_name,
         "dimension": instance.dimension,
+        "n_starts": int(starts.shape[0]),  # A-09 #1: actual start count used
         "known_optimum": known_optimum,
         "status": status,
         "failure_reason": failure_reason,

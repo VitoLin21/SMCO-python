@@ -186,6 +186,18 @@ tryCatch({
          normalized_gap = max(best - .known_optimum, 1e-12) / max(.initial_ref - .known_optimum, 1e-12))
   })
 
+  # A-09 #2: capture git commit + a richer environment hash (R version + key
+  # package versions) so R results are reproducible/auditable like Python's.
+  .git <- tryCatch({
+    out <- suppressWarnings(system2("git", c("rev-parse", "HEAD"),
+                                    stdout = TRUE, stderr = FALSE))
+    if (length(out) && nzchar(out[1])) out[1] else ""
+  }, error = function(e) "")
+  .qrng_v <- tryCatch(as.character(packageVersion("qrng")), error = function(e) "NA")
+  .env_hash <- paste0("R-", R.version$major, ".", R.version$minor,
+                      "|jsonlite=", as.character(packageVersion("jsonlite")),
+                      "|qrng=", .qrng_v)
+
   .payload <- list(
     run_id = .run_id,
     status = "success",
@@ -204,8 +216,8 @@ tryCatch({
     wall_time_sec = as.numeric((proc.time() - .t0)["elapsed"]),
     peak_memory_mb = NA_real_,  # R has no portable ru_maxrss; serialised as null
     machine_id = Sys.info()[["nodename"]],
-    git_commit = "",
-    environment_hash = paste0("R-", R.version$major, ".", R.version$minor),
+    git_commit = .git,
+    environment_hash = .env_hash,
     task = .task,
     algorithm_id = .task$algorithm_id,
     supersedes_run_id = "none",

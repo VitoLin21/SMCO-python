@@ -255,4 +255,44 @@ def aggregate_instance_summary(rows, algorithms):
     return out, fields
 
 
-__all__ = ["problem_seed", "run_on_problem", "run_baseline_on_problem", "aggregate_instance_summary"]
+def write_run_provenance(result_dir, *, kind, algorithms, winner=None, base=None,
+                         suite=None, dims=None, instances=None, fe_budget_per_d=None):
+    """Write ``provenance.json`` capturing the E4/E5 run conditions (A-09 #3).
+
+    Records the git commit, Python/platform environment, frozen algorithm set
+    and budget so a result directory is self-describing for reproduction and
+    cross-language audit.
+    """
+    import json as _json
+    import platform as _platform
+    import subprocess as _sp
+    from pathlib import Path
+
+    try:
+        commit = _sp.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=str(result_dir),
+            stderr=_sp.DEVNULL, timeout=5).decode().strip()
+    except Exception:
+        commit = ""
+    info = {
+        "kind": kind,
+        "git_commit": commit,
+        "python": _platform.python_version(),
+        "platform": _platform.platform(),
+        "suite": suite,
+        "dimensions": list(dims) if dims is not None else None,
+        "instances": list(instances) if instances is not None else None,
+        "fe_budget_per_d": fe_budget_per_d,
+        "algorithms": list(algorithms),
+    }
+    if winner is not None:
+        info["winner"] = winner
+    if base is not None:
+        info["matched_base"] = base
+    out = Path(result_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "provenance.json").write_text(_json.dumps(info, indent=2))
+
+
+__all__ = ["problem_seed", "run_on_problem", "run_baseline_on_problem",
+           "aggregate_instance_summary", "write_run_provenance"]

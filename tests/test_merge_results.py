@@ -284,3 +284,19 @@ def test_audit_start_points_hash_allows_n_starts_tiers():
     audit = audit_payloads([a, b], {"r1": _evo_task(), "r2": _evo_task()})
     check = next(c for c in audit["checks"] if c["name"] == "start_points_hash_consistent")
     assert check["passed"] is True, check
+
+
+def test_baseline_row_uses_outcome_n_starts():
+    """A-09 #1: baseline row must carry the actual start count, not a hard 0."""
+    task = _baseline_task()
+    oc = {
+        "run_id": task["run_id"], "status": "success", "failure_reason": "none",
+        "fe_used": 20000, "best_value": 0.5, "known_optimum": 0.0, "normalized_gap": 0.5,
+        "target_hit_fe": {"1e-1": 100, "1e-2": None, "1e-3": None, "1e-5": None},
+        "anytime": [], "best_so_far_trace": [], "termination_reason": "evaluation_budget",
+        "fe_counts_by_event": {}, "wall_time_sec": 2.0, "peak_memory_mb": None,
+        "machine_id": "h", "git_commit": "", "environment_hash": "env",
+        "supersedes_run_id": "none", "n_starts": 8,
+    }
+    row = baseline_row_from_outcome(oc, task)
+    assert row["n_starts"] == 8

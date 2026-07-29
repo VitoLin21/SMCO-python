@@ -112,7 +112,7 @@ def baseline_row_from_outcome(outcome: dict, task: dict, manifest_id: str = "") 
         "evolutionary": "false",
         "evolution_strategy": NONE_TOKEN,
         "algorithm_id": task["algorithm"],
-        "n_starts": 0,
+        "n_starts": int(outcome.get("n_starts") or 0),  # A-09 #1: from outcome, not hard 0
         "fe_budget": int(task["fe_budget"]),
         "fe_used": int(outcome.get("fe_used") or 0),
         "checkpoint_fe": int(task["fe_budget"]),

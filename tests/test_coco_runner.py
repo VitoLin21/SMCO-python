@@ -68,6 +68,10 @@ def test_lowdim_runner_small_subset(tmp_path):
     assert {r["algorithm_id"] for r in rows} == {"PY-SP-SMCO-EVO", "PY-BASE-SMCO"}
     assert all(int(r["evaluations"]) <= 200 * 5 for r in rows)
     assert (tmp_path / "lowdim_summary.csv").exists()
+    import json
+    prov = json.loads((tmp_path / "provenance.json").read_text())
+    assert prov["winner"] == "PY-SP-SMCO-EVO"
+    assert prov["matched_base"] == "PY-BASE-SMCO"
 
 
 def test_run_baseline_on_problem_smoke():
@@ -113,6 +117,10 @@ def test_bbob_largescale_runner_small_subset(tmp_path):
     assert algos == {"PY-SP-SMCO-EVO", "PY-BASE-SMCO", "DE", "GA", "PSO", "SA", "GenSA"}
     assert all(int(r["evaluations"]) <= 50 * 5 for r in rows)
     assert (tmp_path / "bbob_largescale_summary.csv").exists()
+    import json
+    prov = json.loads((tmp_path / "provenance.json").read_text())
+    assert prov["winner"] == "PY-SP-SMCO-EVO"
+    assert "DE" in prov["algorithms"]
 
 
 def test_aggregate_instance_summary_collapses_instances():

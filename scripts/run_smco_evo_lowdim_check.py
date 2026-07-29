@@ -18,7 +18,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import cocoex  # noqa: E402
 
-from smco.coco_runner import aggregate_instance_summary, run_on_problem  # noqa: E402
+from smco.coco_runner import (  # noqa: E402
+    aggregate_instance_summary,
+    run_on_problem,
+    write_run_provenance,
+)
 from smco.paper_contract import parse_algorithm_id  # noqa: E402
 
 _FAM_TOKEN = {"smco": "SMCO", "smco_refine": "SMCO-REFINE", "smco_boost_refine": "SMCO-BOOST-REFINE"}
@@ -73,6 +77,9 @@ def run_lowdim(*, winner, dims, instances, fe_budget_per_d, result_dir) -> dict:
                ("function", "dimension", "instance", "algorithm_id",
                 "best_observed_fvalue1", "final_target_hit", "evaluations"))
     _write_summary(result_dir / "lowdim_summary.csv", rows, winner_py, base)
+    write_run_provenance(result_dir, kind="e5_lowdim_check", algorithms=[winner_py, base],
+                         winner=winner_py, base=base, suite="bbob",
+                         dims=dims, instances=instances, fe_budget_per_d=fe_budget_per_d)
     return {"n_runs": len(rows), "winner": winner_py, "base": base}
 
 
