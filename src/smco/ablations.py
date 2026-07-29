@@ -19,6 +19,8 @@ flagged in ``ABLATION_DIMENSIONS`` for later.
 
 from __future__ import annotations
 
+import math
+
 from .experiment_manifests import build_algorithm_config
 from .paper_contract import parse_algorithm_id
 
@@ -70,4 +72,28 @@ def ablation_configs(winner_algorithm_id: str) -> list[tuple[str, str, dict]]:
     return configs
 
 
-__all__ = ["ABLATION_DIMENSIONS", "ablation_configs"]
+def start_count_configs(winner_algorithm_id: str, dim: int) -> list[tuple[str, dict]]:
+    """E6.1 start-count ablation: ``(label, config)`` for n_starts in {8, 16, ceil(sqrt(dim))}.
+
+    8 is the control (winner default); strategy/points/rate are fixed at the EVO
+    defaults so only n_starts varies. Empty for a non-EVO winner.
+    """
+    parsed = parse_algorithm_id(winner_algorithm_id)
+    if not parsed["evolutionary"]:
+        return []
+    language, family, semantics = (
+        parsed["language"], parsed["family"], parsed["state_semantics"]
+    )
+    n_list = sorted({8, 16, int(math.ceil(math.sqrt(int(dim))))})
+    configs: list[tuple[str, dict]] = []
+    for n in n_list:
+        cfg = build_algorithm_config(
+            language, family, True, semantics,
+            evolution_strategy="rand1bin", evolution_points=(0.5, 0.75),
+            elimination_rate=0.25, de_factor=0.8, de_crossover=0.7, n_starts=n,
+        )
+        configs.append((f"n{n}", cfg))
+    return configs
+
+
+__all__ = ["ABLATION_DIMENSIONS", "ablation_configs", "start_count_configs"]

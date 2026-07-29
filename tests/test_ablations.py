@@ -87,3 +87,20 @@ def test_build_ablation_manifest(tmp_path):
             winner="PY-BASE-SMCO", functions=["Rastrigin"], dims=[4],
             n_instances=1, fe_budget_per_d=50, checkpoints_per_d=(50,),
         )
+
+
+def test_start_count_configs_three_tiers():
+    from smco.ablations import start_count_configs
+    configs = start_count_configs("PY-SP-SMCO-EVO", 1000)
+    labels = [label for label, _cfg in configs]
+    ns = sorted({cfg["n_starts"] for _label, cfg in configs})
+    assert ns == [8, 16, 32]  # ceil(sqrt(1000)) = 32
+    assert set(labels) == {"n8", "n16", "n32"}
+    # different n_starts → different configuration_hash
+    hashes = {cfg["configuration_hash"] for _label, cfg in configs}
+    assert len(hashes) == 3
+
+
+def test_start_count_configs_non_evo_empty():
+    from smco.ablations import start_count_configs
+    assert start_count_configs("PY-BASE-SMCO", 1000) == []
