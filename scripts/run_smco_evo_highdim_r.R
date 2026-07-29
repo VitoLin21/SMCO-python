@@ -31,7 +31,11 @@ Sys.setenv(OMP_NUM_THREADS = "1", OPENBLAS_NUM_THREADS = "1",
 })()
 .repo_root <- dirname(dirname(.self_path))
 .vendor <- file.path(.repo_root, "vendor", "SMCO_R", "main")
-source(file.path(.vendor, "SMCO_evo.R"))         # auto-sources SMCO.R + evaluation_budget.R + stateful
+# Source order (per campaign memory): evaluation_budget.R -> SMCO.R ->
+# SMCO_evo.R (which auto-sources SMCO_evo_stateful.R from its own directory).
+source(file.path(.vendor, "evaluation_budget.R"))
+source(file.path(.vendor, "SMCO.R"))
+source(file.path(.vendor, "SMCO_evo.R"))
 source(file.path(.vendor, "highdim_instances.R"))
 
 if (!requireNamespace("jsonlite", quietly = TRUE)) {
@@ -82,7 +86,8 @@ tryCatch({
 
   .inst <- load_highdim_instance(
     .inst_dir, .task[["function"]], as.integer(.task$dimension),
-    .meta$asymmetry_strength, .meta$objective_scale, .meta$known_optimum_value
+    as.numeric(.meta$asymmetry_strength), as.numeric(.meta$objective_scale),
+    as.numeric(.meta$known_optimum_value)
   )
   .starts <- .inst$starts
   .dim <- .inst$dimension
@@ -104,7 +109,10 @@ tryCatch({
   }
 
   .cfg <- .task$algorithm_config
-  .seed <- as.integer(.task$seed)
+  # task$seed is a 32-bit run-key hash (can exceed R's integer max); R's RNG
+  # needs a seed < 2^31. Python/R use independent RNG streams (plan 4.4), so we
+  # only need determinism, hence the modulo into R's integer range.
+  .seed <- as.integer(as.numeric(.task$seed) %% 2147483647)
   .fe_budget <- as.integer(.task$fe_budget)
   .iter_max <- max(1L, as.integer(.fe_budget %/% (2L * .dim + 1L)))
   .ctrl <- list(iter_max = .iter_max, max_evals = .fe_budget,
