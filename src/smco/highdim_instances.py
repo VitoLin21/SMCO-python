@@ -329,9 +329,14 @@ def _read_matrix_gz(path: Path) -> np.ndarray:
 
 
 def write_instance_artifacts(
-    instance: HighDimInstance, starts: np.ndarray, out_dir: str | Path
+    instance: HighDimInstance, starts: np.ndarray, out_dir: str | Path,
+    *, extra_starts: dict | None = None,
 ) -> dict:
-    """Persist an instance + shared starts; return metadata with file hashes."""
+    """Persist an instance + shared starts; return metadata with file hashes.
+
+    ``extra_starts`` maps n_starts tiers (e.g. ``{16: matrix}``) to additional
+    start matrices written as ``starts_n{N}.csv.gz`` with their own hashes.
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     spec = instance.transform_spec
@@ -363,6 +368,28 @@ def write_instance_artifacts(
     starts_path = out_dir / "starts.csv.gz"
     _write_matrix_gz(starts_path, starts)
 
+    extra_starts_meta: dict = {}
+    if extra_starts:
+        for n_starts_tier, tier_starts in extra_starts.items():
+            n_starts_tier = int(n_starts_tier)
+            tier_starts = np.asarray(tier_starts, dtype=float)
+            if tier_starts.shape[0] != n_starts_tier:
+                raise ValueError(
+                    f"extra_starts[{n_starts_tier}] has {tier_starts.shape[0]} rows"
+                )
+            if tier_starts.shape[1] != instance.dimension:
+                raise ValueError(
+                    f"extra_starts[{n_starts_tier}] has {tier_starts.shape[1]} cols, "
+                    f"expected dimension {instance.dimension}"
+                )
+            tier_path = out_dir / f"starts_n{n_starts_tier}.csv.gz"
+            _write_matrix_gz(tier_path, tier_starts)
+            extra_starts_meta[str(n_starts_tier)] = {
+                "file": tier_path.name,
+                "hash": _sha256_file(tier_path),
+                "n_starts": n_starts_tier,
+            }
+
     metadata = {
         "generator_version": instance.generator_version,
         "function_name": instance.function_name,
@@ -386,6 +413,7 @@ def write_instance_artifacts(
             "starts": _sha256_file(starts_path),
         },
         "transform_sha256": spec.sha256(),
+        "extra_starts": extra_starts_meta,
     }
     (out_dir / "metadata.json").write_text(
         json.dumps(metadata, indent=2, ensure_ascii=False)
@@ -443,8 +471,16 @@ def load_instance(artifact_dir: str | Path) -> HighDimInstance:
     )
 
 
-def load_starts(artifact_dir: str | Path) -> np.ndarray:
-    return _read_matrix_gz(Path(artifact_dir) / "starts.csv.gz")
+def load_starts(artifact_dir: str | Path, n_starts: int = 8) -> np.ndarray:
+    artifact_dir = Path(artifact_dir)
+    if int(n_starts) == 8:
+        return _read_matrix_gz(artifact_dir / "starts.csv.gz")
+    path = artifact_dir / f"starts_n{int(n_starts)}.csv.gz"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"no starts artifact for n_starts={n_starts} in {artifact_dir}"
+        )
+    return _read_matrix_gz(path)
 
 
 __all__ = [

@@ -222,3 +222,32 @@ def test_build_instance_set_writes_artifacts_and_index(tmp_path):
     h2 = {key(e): e["transform_sha256"] for e in index2["instances"]}
     assert h1 == h2
     assert (tmp_path / "instances_index.json").exists()
+
+
+def test_write_extra_starts_artifacts(tmp_path):
+    inst = generate_instance("Rastrigin", 4, 0, seed=1)
+    starts8 = np.tile(inst.bounds_lower, (8, 1))
+    extra16 = np.tile(inst.bounds_upper, (16, 1))
+    meta = write_instance_artifacts(inst, starts8, tmp_path, extra_starts={16: extra16})
+    assert meta["extra_starts"]["16"]["file"] == "starts_n16.csv.gz"
+    assert meta["extra_starts"]["16"]["n_starts"] == 16
+    assert (tmp_path / "starts_n16.csv.gz").exists()
+    # default n8 path unchanged
+    assert meta["file_hashes"]["starts"] and meta["n_starts"] == 8
+
+
+def test_load_starts_by_n(tmp_path):
+    inst = generate_instance("Rastrigin", 4, 0, seed=1)
+    s8 = np.zeros((8, 4))
+    s16 = np.full((16, 4), 7.0)
+    write_instance_artifacts(inst, s8, tmp_path, extra_starts={16: s16})
+    assert load_starts(tmp_path).shape == (8, 4)        # default n8
+    assert load_starts(tmp_path, 8).shape == (8, 4)     # explicit n8
+    assert load_starts(tmp_path, 16).shape == (16, 4)   # extra tier
+
+
+def test_load_starts_missing_tier_raises(tmp_path):
+    inst = generate_instance("Rastrigin", 4, 0, seed=1)
+    write_instance_artifacts(inst, np.zeros((8, 4)), tmp_path)
+    with pytest.raises(FileNotFoundError):
+        load_starts(tmp_path, 99)
