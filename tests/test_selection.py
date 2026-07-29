@@ -2,12 +2,9 @@
 
 Selection picks ONE SMCO-EVO implementation globally across all functions,
 dimensions and instances (no per-function cherry-picking). The ranking cascade
-is: target-hit rate -> median normalized log-gap -> failure rate -> median
-wall time, and every tie-break step must be written into the report.
-
-Note: the full ECDF-AUC over log10(FE/d) is a Gate-E refinement once E1 results
-exist; until then the primary score is the B-max target-hit rate (a monotone
-proxy), clearly marked in SELECTION_RULES.
+is: ECDF-AUC of relative targets over log10(FE/dim) -> (within 1% AUC) median
+normalized log-gap -> failure rate -> median wall time. Failed/timeout runs
+stay in the denominator as right-censored (never-solved) target pairs.
 """
 
 from __future__ import annotations
@@ -73,17 +70,53 @@ def test_score_config_counts_failures_in_denominator():
     s = score_config(runs)
     assert s["n_runs"] == 2
     assert s["failure_rate"] == 0.5
+    # A-02: failed runs keep their 4 target slots in the denominator (right
+    # censored) -> 1 hit / 8 slots, not 1/4.
+    assert pytest.approx(s["target_hit_rate"], rel=1e-9) == 1 / 8
 
 
-def test_rank_configs_orders_by_target_hit_rate_then_gap():
+def test_rank_configs_orders_by_ecdf_auc_then_gap():
     scored = {
-        "A": {"target_hit_rate": 0.8, "median_log_gap": -3.0, "failure_rate": 0.0, "median_wall_time": 5.0},
-        "B": {"target_hit_rate": 0.5, "median_log_gap": -2.0, "failure_rate": 0.0, "median_wall_time": 4.0},
-        "C": {"target_hit_rate": 0.8, "median_log_gap": -4.0, "failure_rate": 0.0, "median_wall_time": 6.0},
+        "A": {"ecdf_auc": 0.8, "median_log_gap": -3.0, "failure_rate": 0.0, "median_wall_time": 5.0},
+        "B": {"ecdf_auc": 0.5, "median_log_gap": -2.0, "failure_rate": 0.0, "median_wall_time": 4.0},
+        "C": {"ecdf_auc": 0.8, "median_log_gap": -4.0, "failure_rate": 0.0, "median_wall_time": 6.0},
     }
     ranked = rank_configs(scored)
     order = [aid for aid, _ in ranked]
-    # A and C tie on hit rate (0.8); C has lower log-gap (-4 < -3) -> C first, then A; B last.
+    # A and C tie on ecdf_auc (0.8, within 1%); C has lower log-gap -> C first; B last.
+    assert order == ["C", "A", "B"]
+
+
+def test_ecdf_auc_perfect_when_all_targets_hit_early():
+    from smco.selection import ecdf_auc
+    run = {"status": "success", "dimension": 10,
+           "target_hit_fe": {"1e-1": 10, "1e-2": 10, "1e-3": 10, "1e-5": 10}}
+    assert pytest.approx(ecdf_auc([run]), abs=1e-9) == 1.0
+
+
+def test_ecdf_auc_zero_when_all_fail():
+    from smco.selection import ecdf_auc
+    run = {"status": "algorithm_failure", "dimension": 10, "target_hit_fe": {}}
+    assert ecdf_auc([run]) == 0.0
+
+
+def test_ecdf_auc_failure_lowers_score_below_all_success():
+    from smco.selection import ecdf_auc
+    good = {"status": "success", "dimension": 10,
+            "target_hit_fe": {"1e-1": 10, "1e-2": 10, "1e-3": 10, "1e-5": 10}}
+    mixed = [good, {"status": "algorithm_failure", "dimension": 10, "target_hit_fe": {}}]
+    assert 0.0 < ecdf_auc(mixed) < ecdf_auc([good])
+
+
+def test_rank_configs_ecdf_auc_one_percent_threshold():
+    scored = {
+        "A": {"ecdf_auc": 0.80, "median_log_gap": -3.0, "failure_rate": 0.0, "median_wall_time": 5.0},
+        "B": {"ecdf_auc": 0.50, "median_log_gap": -2.0, "failure_rate": 0.0, "median_wall_time": 4.0},
+        "C": {"ecdf_auc": 0.805, "median_log_gap": -4.0, "failure_rate": 0.0, "median_wall_time": 6.0},
+    }
+    ranked = rank_configs(scored)
+    order = [aid for aid, _ in ranked]
+    # A(0.80) & C(0.805) within 1% -> tiebreak log-gap: C(-4)<A(-3) -> C,A; B far below -> last.
     assert order == ["C", "A", "B"]
 
 
