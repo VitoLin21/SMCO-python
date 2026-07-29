@@ -25,7 +25,6 @@ from typing import Any
 
 import numpy as np
 
-from .experiment_manifests import result_row_from_task
 from .highdim_instances import HighDimInstance
 from .optimizer import smco, smco_br, smco_br_evo, smco_evo, smco_r, smco_r_evo
 from .paper_contract import NONE_TOKEN, parse_algorithm_id
@@ -204,26 +203,6 @@ def run_task(
             }
         )
 
-    result_row = result_row_from_task(
-        task,
-        best_value=float(best_min),
-        fe_used=fe_used,
-        status=status,
-        known_optimum=known_optimum,
-        normalized_gap=normalized_gap,
-        checkpoint_fe=fe_budget,
-        target_hit_fe=target_hit,
-        wall_time_sec=wall_time,
-        peak_memory_mb=peak_memory_mb,
-        failure_reason=failure_reason,
-        termination_reason=termination_reason,
-        fe_counts_by_event=str(evaluation_counts),
-        machine_id=machine_id,
-        git_commit=git_commit,
-        environment_hash=environment_hash,
-        objective_sense="minimize",
-    )
-
     return {
         "run_id": task["run_id"],
         "status": status,
@@ -235,11 +214,17 @@ def run_task(
         "normalized_gap": normalized_gap,
         "target_hit_fe": target_hit,
         "anytime": anytime,
+        "best_so_far_trace": [[int(fe), float(val)] for fe, val in observer.trace],
         "termination_reason": termination_reason,
-        "evaluation_counts_by_event": evaluation_counts,
+        "fe_counts_by_event": evaluation_counts,
         "wall_time_sec": wall_time,
         "peak_memory_mb": peak_memory_mb,
-        "result_row": result_row,
+        "machine_id": machine_id,
+        "git_commit": git_commit,
+        "environment_hash": environment_hash,
+        "task": task,
+        "algorithm_id": task["algorithm_id"],
+        "supersedes_run_id": NONE_TOKEN,
     }
 
 

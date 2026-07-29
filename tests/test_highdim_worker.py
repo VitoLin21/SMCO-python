@@ -20,7 +20,7 @@ import pytest
 from smco.experiment_manifests import build_algorithm_config, build_task
 from smco.highdim_instances import generate_instance, write_instance_artifacts
 from smco.highdim_worker import run_task
-from smco.paper_contract import validate_result_row
+from smco.paper_contract import validate_outcome
 
 
 def _starts(instance, n_starts=4, seed=0):
@@ -65,8 +65,10 @@ def test_run_task_base_smco_smoke():
     assert res["best_value"] <= initial + 1e-9
     assert set(res["target_hit_fe"]) == {"1e-1", "1e-2", "1e-3", "1e-5"}
     assert [a["checkpoint_fe"] for a in res["anytime"]] == [50, 100, 200]
-    assert validate_result_row(res["result_row"]) == []
-    assert res["result_row"]["run_id"] == _base_task()["run_id"]
+    assert validate_outcome(res) == []
+    assert res["task"]["run_id"] == _base_task()["run_id"]
+    assert res["supersedes_run_id"] == "none"
+    assert isinstance(res["best_so_far_trace"], list)
 
 
 def test_run_task_evo_sp_smoke():
@@ -77,7 +79,7 @@ def test_run_task_evo_sp_smoke():
     assert res["fe_used"] <= 300
     assert res["best_value"] >= -1e-9
     assert set(res["target_hit_fe"]) == {"1e-1", "1e-2", "1e-3", "1e-5"}
-    assert validate_result_row(res["result_row"]) == []
+    assert validate_outcome(res) == []
 
 
 def test_run_task_evo_restart_smoke():
@@ -86,7 +88,7 @@ def test_run_task_evo_restart_smoke():
     res = run_task(_evo_task(semantics="restart"), inst, starts)
     assert res["status"] == "success"
     assert res["fe_used"] <= 300
-    assert validate_result_row(res["result_row"]) == []
+    assert validate_outcome(res) == []
 
 
 def test_run_task_br_smoke():
@@ -98,7 +100,7 @@ def test_run_task_br_smoke():
     assert res["status"] == "success"
     assert res["fe_used"] <= 400
     assert set(res["target_hit_fe"]) == {"1e-1", "1e-2", "1e-3", "1e-5"}
-    assert validate_result_row(res["result_row"]) == []
+    assert validate_outcome(res) == []
 
 
 def test_run_task_rejects_r_language():
@@ -121,7 +123,7 @@ def test_run_task_normalized_gap_in_unit_interval():
     inst = generate_instance("Rastrigin", 4, 0, seed=1)
     starts = _starts(inst)
     res = run_task(_base_task(), inst, starts)
-    gap = float(res["result_row"]["normalized_gap"])
+    gap = float(res["normalized_gap"])
     assert not np.isnan(gap)
     assert -1e-9 <= gap <= 1.0 + 1e-9
 
@@ -147,7 +149,6 @@ def test_run_task_fe_used_observed_equals_budget_cap_path():
     task = _base_task(fe_budget=20)
     res = run_task(task, inst, starts)
     assert res["fe_used"] <= 20
-    assert res["result_row"]["fe_used"] == res["fe_used"]
 
 
 def test_target_hit_uses_relative_normalized_gap_threshold():
@@ -220,7 +221,8 @@ def test_run_task_file_end_to_end(tmp_path):
     payload = json.loads(out.read_text())
     assert payload["status"] == "success"
     assert payload["fe_used"] <= 200
-    assert payload["result_row"]["run_id"] == task["run_id"]
+    assert payload["run_id"] == task["run_id"]
+    assert payload["task"]["run_id"] == task["run_id"]
     assert (log_dir / f"{task['run_id']}.log").exists()
 
 
