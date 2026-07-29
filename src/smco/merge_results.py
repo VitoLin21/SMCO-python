@@ -36,12 +36,18 @@ def classify_task(task: dict) -> str:
 
 
 def build_task_index(manifest_paths: Iterable[str]) -> dict[str, dict]:
-    """Load + verify all manifests; return {run_id: task}."""
+    """Load + verify all manifests; return {run_id: task}.
+
+    Each task is annotated with its source ``manifest_id`` so :func:`merge`
+    can stamp the real manifest id onto result rows (A-08 #3).
+    """
     index: dict[str, dict] = {}
     for path in manifest_paths:
         manifest = load_manifest(path)
         verify_manifest(manifest)
+        mid = manifest.get("manifest_id") or Path(path).stem
         for task in manifest.get("tasks", []):
+            task["manifest_id"] = mid
             index[task["run_id"]] = task
     return index
 
@@ -225,10 +231,12 @@ def audit_payloads(rows: list[dict], task_index: dict[str, dict]) -> dict:
     checks.append(_check("gap_sanity", rows, not bad_gap,
                          [f"best<optimum: {b}" for b in bad_gap]))
 
-    # 8. start_points_hash consistent within (function,dim,instance)
+    # 8. start_points_hash consistent within (function,dim,instance,n_starts)
     by_inst: dict[tuple, set] = {}
     for r in rows:
-        key = (r["function"], int(r["dimension"]), int(r["instance"]))
+        # n_starts in the key so legitimate E6.1 tiers (same instance, more
+        # starts -> a different starts artifact) are not flagged as a clash.
+        key = (r["function"], int(r["dimension"]), int(r["instance"]), int(r["n_starts"]))
         by_inst.setdefault(key, set()).add(r.get("start_points_hash"))
     clash = [f"{k}" for k, v in by_inst.items() if len(v) > 1]
     checks.append(_check("start_points_hash_consistent", rows, not clash,
@@ -318,11 +326,17 @@ def merge(manifest_paths, raw_dirs, merged_dir) -> dict:
         run_id = outcome["run_id"]
         task = task_index.get(run_id)
         if task is None:
-            continue  # orphan — recorded via coverage gap; row dropped here
+            # A-08 #2: orphan (run_id in no manifest). Build a row from the
+            # embedded task so the manifest_coverage audit flags it instead of
+            # silently dropping it. manifest_id stays empty (no source manifest).
+            task = outcome.get("task") or {}
+            if not task.get("run_id"):
+                continue
+        mid = task.get("manifest_id") or ""
         if classify_task(task) == "smco":
-            attempts.append(smco_row_from_outcome(outcome, task, manifest_id=run_id))
+            attempts.append(smco_row_from_outcome(outcome, task, manifest_id=mid))
         else:
-            attempts.append(baseline_row_from_outcome(outcome, task, manifest_id=run_id))
+            attempts.append(baseline_row_from_outcome(outcome, task, manifest_id=mid))
 
     valid, superseded = resolve_supersedes(attempts)
     audit = audit_payloads(attempts, task_index)

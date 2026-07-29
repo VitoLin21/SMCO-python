@@ -88,6 +88,26 @@ def test_run_id_deterministic_and_cross_language_stable():
     assert pc.compute_run_id(other) != r1
 
 
+def test_run_id_includes_checkpoints():
+    # A-08 #1: SMCO run_id must change when checkpoints change (matching the
+    # baseline run_id, which already includes checkpoints), so two anytime
+    # schedules over the same task are distinct runs.
+    base = {
+        "stage": "e1_development", "suite": "synthetic_highdim",
+        "function": "rastrigin", "dimension": 1000, "instance": 1,
+        "replication": 0, "algorithm_id": "PY-SP-SMCO-EVO",
+        "evolution_strategy": "rand1bin", "seed": 11, "fe_budget": 1000000,
+        "n_starts": 8, "configuration_hash": "cfg_x",
+    }
+    a = dict(base); a["checkpoints"] = [100, 200]
+    b = dict(base); b["checkpoints"] = [100, 200, 300]
+    assert pc.compute_run_id(a) != pc.compute_run_id(b)
+    c = dict(base); c["checkpoints"] = [200, 100]  # order matters
+    assert pc.compute_run_id(c) != pc.compute_run_id(a)
+    # a task without checkpoints still produces a stable id (backward compatible)
+    assert pc.compute_run_id(base) == pc.compute_run_id(dict(base))
+
+
 def test_configuration_hash_stable_across_float_formatting():
     cfg = {
         "de_factor": pc.format_cfg_float(0.8),

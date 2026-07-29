@@ -174,8 +174,17 @@ _RUN_ID_KEYS = (
 
 
 def compute_run_id(task: Mapping[str, Any]) -> str:
-    """``run_id = 'r' + sha256(canonical_json(task_subset))[:16]`` (contract 3)."""
+    """``run_id = 'r' + sha256(canonical_json(task_subset))[:16]`` (contract 3).
+
+    Includes ``checkpoints`` (as an order-sensitive list) so two anytime
+    schedules over the same task are distinct runs — matching
+    :func:`experiment_manifests.baseline_run_id`, which already included it
+    (A-08 #1). A task without ``checkpoints`` keeps its pre-fix id.
+    """
     canonical = {k: _normalize_scalar(task.get(k)) for k in _RUN_ID_KEYS}
+    cps = task.get("checkpoints")
+    if cps is not None:
+        canonical["checkpoints"] = [_normalize_scalar(int(c)) for c in cps]
     digest = hashlib.sha256(canonical_json(canonical).encode("utf-8")).hexdigest()
     return "r" + digest[:16]
 

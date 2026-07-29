@@ -244,3 +244,43 @@ def test_merge_reports_missing_runs(tmp_path):
 def test_identity_key_distinguishes_n_starts():
     a = _row("r1"); b = _row("r2", n_starts=16)
     assert _identity_key(a) != _identity_key(b)
+
+
+def test_merge_orphan_outcome_flagged_in_coverage_audit(tmp_path):
+    """A-08 #2: an outcome whose run_id is in NO manifest must be surfaced to
+    the manifest_coverage audit, not silently dropped."""
+    task = _evo_task()
+    manifest = freeze_manifest(build_manifest("e1_development", "synthetic_highdim", [task]))
+    mp = tmp_path / "m.json"; mp.write_text(json.dumps(manifest))
+    raw = tmp_path / "raw"; raw.mkdir()
+    _write(raw, task["run_id"], _smco_outcome(task))
+    orphan_task = _evo_task(); orphan_task["run_id"] = "r_orphan_not_in_manifest"
+    _write(raw, "r_orphan_not_in_manifest", _smco_outcome(orphan_task))
+
+    summary = merge([mp], [raw], tmp_path / "merged")
+    cov = next(c for c in summary["audit"]["checks"] if c["name"] == "manifest_coverage")
+    assert cov["passed"] is False
+    assert any("r_orphan_not_in_manifest" in e for e in cov["errors"])
+
+
+def test_merge_manifest_id_is_real_manifest_id_not_run_id(tmp_path):
+    """A-08 #3: the row's manifest_id is the manifest's id, not the run_id."""
+    task = _evo_task()
+    manifest = freeze_manifest(build_manifest("e1_development", "synthetic_highdim", [task]))
+    mp = tmp_path / "m.json"; mp.write_text(json.dumps(manifest))
+    raw = tmp_path / "raw"; raw.mkdir()
+    _write(raw, task["run_id"], _smco_outcome(task))
+    merge([mp], [raw], tmp_path / "merged")
+    rows = list(csv.DictReader(open(tmp_path / "merged" / "all_attempts.csv")))
+    assert rows[0]["manifest_id"] == manifest["manifest_id"]
+    assert rows[0]["manifest_id"] != rows[0]["run_id"]
+
+
+def test_audit_start_points_hash_allows_n_starts_tiers():
+    """A-08 #4: legitimate E6.1 tiers (same instance, different n_starts ->
+    different starts hashes) must NOT be flagged as a starts-hash clash."""
+    a = _row("r1", n_starts=8, start_points_hash="sh8")
+    b = _row("r2", n_starts=16, start_points_hash="sh16")
+    audit = audit_payloads([a, b], {"r1": _evo_task(), "r2": _evo_task()})
+    check = next(c for c in audit["checks"] if c["name"] == "start_points_hash_consistent")
+    assert check["passed"] is True, check
