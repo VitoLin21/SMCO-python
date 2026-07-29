@@ -202,6 +202,19 @@ def build_task(
     return task
 
 
+def _select_start_points_hash(entry: dict, n_starts: int):
+    """Pick the start_points_hash for the requested n_starts tier.
+
+    n_starts=8 (or an entry without extra_starts) → the default starts hash;
+    other tiers → the matching extra_starts hash.
+    """
+    if n_starts != 8:
+        extra = (entry.get("extra_starts") or {}).get(str(int(n_starts)))
+        if extra:
+            return extra.get("hash")
+    return entry.get("start_points_hash")
+
+
 def expand_tasks(
     stage: str,
     suite: str,
@@ -228,16 +241,18 @@ def expand_tasks(
             fe_budget = int(fe_budget_per_d) * dim
             checkpoints = [int(c) * dim for c in checkpoints_per_d]
             for instance in range(n_instances):
-                provenance: dict = {}
-                if instance_index is not None:
-                    entry = instance_index.get((function, dim, instance))
-                    if entry is not None:
-                        provenance = {
-                            "instance_artifact_dir": entry.get("artifact_dir"),
-                            "instance_hash": entry.get("transform_sha256"),
-                            "start_points_hash": entry.get("start_points_hash"),
-                        }
                 for config in configs:
+                    provenance: dict = {}
+                    if instance_index is not None:
+                        entry = instance_index.get((function, dim, instance))
+                        if entry is not None:
+                            provenance = {
+                                "instance_artifact_dir": entry.get("artifact_dir"),
+                                "instance_hash": entry.get("transform_sha256"),
+                                "start_points_hash": _select_start_points_hash(
+                                    entry, int(config["n_starts"])
+                                ),
+                            }
                     seed = derive_seed(
                         stage, suite, function, dim, instance, replication,
                         config["algorithm_id"],

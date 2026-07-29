@@ -323,3 +323,23 @@ def test_build_manifest_for_suite_dry_run_reports_counts(tmp_path):
     assert summary["unique_run_ids"] == summary["n_tasks"]
     assert summary["total_fe_budget"] == summary["n_tasks"] * (1000 * 200)
 
+
+def test_expand_tasks_selects_start_points_hash_by_n_starts():
+    cfg8 = build_algorithm_config("python", "smco", True, "state_preserving",
+        evolution_strategy="rand1bin", evolution_points=(0.5, 0.75),
+        elimination_rate=0.25, de_factor=0.8, de_crossover=0.7, n_starts=8)
+    cfg16 = build_algorithm_config("python", "smco", True, "state_preserving",
+        evolution_strategy="rand1bin", evolution_points=(0.5, 0.75),
+        elimination_rate=0.25, de_factor=0.8, de_crossover=0.7, n_starts=16)
+    index = {("Rastrigin", 4, 0): {
+        "artifact_dir": "art", "transform_sha256": "ih",
+        "start_points_hash": "hash_n8",
+        "extra_starts": {"16": {"hash": "hash_n16", "n_starts": 16}},
+    }}
+    tasks = expand_tasks("e6_ablations", "synthetic_highdim", ["Rastrigin"], [4], 1,
+                         [cfg8, cfg16], fe_budget_per_d=100, checkpoints_per_d=(100,),
+                         instance_index=index)
+    by_n = {t["n_starts"]: t["start_points_hash"] for t in tasks}
+    assert by_n[8] == "hash_n8"
+    assert by_n[16] == "hash_n16"
+
