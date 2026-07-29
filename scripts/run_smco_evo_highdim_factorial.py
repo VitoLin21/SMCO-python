@@ -174,7 +174,6 @@ def run_task_file(
                 "run_id": run_id,
                 "status": "infra_failure",
                 "failure_reason": f"{type(exc).__name__}: {exc}",
-                "result_row": None,
             },
         )
         return 1
