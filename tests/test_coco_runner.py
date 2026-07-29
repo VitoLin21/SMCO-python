@@ -94,3 +94,22 @@ def test_run_baseline_rejects_unknown():
     p = _first_problem(5)
     with pytest.raises(ValueError):
         run_baseline_on_problem(p, algorithm_name="CMAES", fe_budget=50)
+
+
+def test_bbob_largescale_runner_small_subset(tmp_path):
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        "largescale_cli", Path("scripts/run_smco_evo_bbob_largescale.py"))
+    cli = importlib.util.module_from_spec(spec); spec.loader.exec_module(cli)
+    # bbob d5 (加速), 1 instance, winner+base+5 baselines = 7 algorithms x 24 func = 168 runs
+    summary = cli.run_bbob_largescale(
+        winner="PY-SP-SMCO-EVO", suite="bbob", dims=[5], instances=[1],
+        fe_budget_per_d=50, result_dir=tmp_path)
+    import csv
+    rows = list(csv.DictReader(open(tmp_path / "bbob_largescale.csv")))
+    assert len(rows) == 24 * 1 * 1 * 7  # 24 func x 1 inst x d5 x 7 algos
+    algos = {r["algorithm_id"] for r in rows}
+    assert algos == {"PY-SP-SMCO-EVO", "PY-BASE-SMCO", "DE", "GA", "PSO", "SA", "GenSA"}
+    assert all(int(r["evaluations"]) <= 50 * 5 for r in rows)
+    assert (tmp_path / "bbob_largescale_summary.csv").exists()
