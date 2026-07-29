@@ -68,3 +68,29 @@ def test_lowdim_runner_small_subset(tmp_path):
     assert {r["algorithm_id"] for r in rows} == {"PY-SP-SMCO-EVO", "PY-BASE-SMCO"}
     assert all(int(r["evaluations"]) <= 200 * 5 for r in rows)
     assert (tmp_path / "lowdim_summary.csv").exists()
+
+
+def test_run_baseline_on_problem_smoke():
+    from smco.coco_runner import run_baseline_on_problem
+    p = _first_problem(5)
+    res = run_baseline_on_problem(p, algorithm_name="GenSA", fe_budget=200)
+    assert res["dimension"] == 5
+    assert res["evaluations"] <= 200
+    assert res["evaluations"] > 0
+    assert res["algorithm_id"] == "GenSA"
+    assert isinstance(res["final_target_hit"], bool)
+
+
+def test_run_baseline_fe_hard_stop():
+    from smco.coco_runner import run_baseline_on_problem
+    p = _first_problem(5)
+    res = run_baseline_on_problem(p, algorithm_name="DE", fe_budget=30)
+    assert res["evaluations"] <= 30
+
+
+def test_run_baseline_rejects_unknown():
+    import pytest
+    from smco.coco_runner import run_baseline_on_problem
+    p = _first_problem(5)
+    with pytest.raises(ValueError):
+        run_baseline_on_problem(p, algorithm_name="CMAES", fe_budget=50)

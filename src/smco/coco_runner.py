@@ -16,6 +16,12 @@ import numpy as np
 
 from .optimizer import smco, smco_br, smco_br_evo, smco_evo, smco_r, smco_r_evo
 from .paper_contract import parse_algorithm_id
+from comparison.methods.de import differential_evo
+from comparison.methods.ga import genetic_algorithm
+from comparison.methods.gensa import gensa
+from comparison.methods.pso import particle_swarm
+from comparison.methods.sa import simulated_annealing
+from .evaluation import EvaluationBudgetExceeded
 
 _BASE_DISPATCH = {
     ("python", "smco"): smco,
@@ -54,6 +60,88 @@ def _select_algorithm(algorithm_id: str):
     if key not in table:
         raise ValueError(f"no Python dispatch for family={parsed['family']!r}")
     return table[key], parsed
+
+
+_BASELINE_DISPATCH = {
+    "DE": differential_evo,
+    "GA": genetic_algorithm,
+    "PSO": particle_swarm,
+    "SA": simulated_annealing,
+    "GenSA": gensa,
+}
+
+
+class _CocoMinObserver:
+    """Minimisation objective over a cocoex problem with a FE hard stop.
+
+    Clips probe points to the cocoex bounds and penalises non-finite values
+    (mirroring the SMCO path in :func:`run_on_problem`). Raises
+    :class:`EvaluationBudgetExceeded` at ``max_evals`` so the baseline loop stops.
+    """
+
+    def __init__(self, problem, max_evals: int) -> None:
+        self.problem = problem
+        self.max_evals = int(max_evals)
+        self.fe = 0
+
+    def __call__(self, x):
+        if self.fe >= self.max_evals:
+            raise EvaluationBudgetExceeded(
+                f"cocoex FE budget {self.max_evals} reached"
+            )
+        self.fe += 1
+        x = np.clip(np.asarray(x, dtype=float), self.problem.lower_bounds, self.problem.upper_bounds)
+        if not np.all(np.isfinite(x)):
+            return 1e10
+        v = float(self.problem(x))
+        if not np.isfinite(v):
+            return 1e10
+        return v
+
+
+def run_baseline_on_problem(
+    problem,
+    *,
+    algorithm_name: str,
+    fe_budget: int,
+    n_starts: int = 8,
+    seed: int | None = None,
+    observer: Any = None,
+) -> dict:
+    """Run one comparison baseline on a cocoex problem; return cocoex metrics.
+
+    Minimisation (``maximize=False``); FE is hard-stopped by ``_CocoMinObserver``.
+    """
+    if algorithm_name not in _BASELINE_DISPATCH:
+        raise ValueError(f"unknown baseline: {algorithm_name!r}")
+    if observer is not None:
+        problem.observe_with(observer)
+    dim = int(problem.dimension)
+    algorithm = _BASELINE_DISPATCH[algorithm_name]
+    if seed is None:
+        seed = problem_seed(problem, n_starts)
+    rng = np.random.default_rng(seed)
+    span = problem.upper_bounds - problem.lower_bounds
+    starts = problem.lower_bounds + rng.uniform(size=(n_starts, dim)) * span
+
+    observer_obj = _CocoMinObserver(problem, fe_budget)
+    try:
+        algorithm(
+            observer_obj, problem.lower_bounds, problem.upper_bounds,
+            start_points=starts, maximize=False, max_iter=int(fe_budget), seed=int(seed),
+        )
+    except EvaluationBudgetExceeded:
+        pass  # expected hard stop at the FE budget
+
+    return {
+        "algorithm_id": algorithm_name,
+        "function": int(problem.id_function),
+        "dimension": dim,
+        "instance": int(problem.id_instance),
+        "best_observed_fvalue1": float(problem.best_observed_fvalue1),
+        "final_target_hit": bool(problem.final_target_hit),
+        "evaluations": int(problem.evaluations),
+    }
 
 
 def run_on_problem(
@@ -127,4 +215,4 @@ def run_on_problem(
     }
 
 
-__all__ = ["problem_seed", "run_on_problem"]
+__all__ = ["problem_seed", "run_on_problem", "run_baseline_on_problem"]
