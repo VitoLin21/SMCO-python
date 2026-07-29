@@ -18,7 +18,7 @@
 | --- | --- |
 | 方向 | `best_value` 为 minimization（Rastrigin ≥ 0）；budget/direction violations = **NONE** |
 | FE 预算 | 所有 task `fe_used ≤ fe_budget`（d=200 全 ≈19665–19701/20000，hard stop 生效） |
-| schema | result payload 字段齐：status/fe_used/best_value/known_optimum/normalized_gap/target_hit_fe/anytime/wall_time_sec/machine_id |
+| schema | outcome payload 字段齐：status/fe_used/fe_budget/best_value/known_optimum/normalized_gap/target_hit_fe/anytime/best_so_far_trace/termination_reason/fe_counts_by_event/wall_time_sec/peak_memory_mb/machine_id/git_commit/environment_hash/task/algorithm_id/supersedes_run_id（**统一 outcome 契约**，2026-07-29 重构；`result_row` 已移至 merge 单点构建） |
 | 日志 | 每 run 写 `logs/<run_id>.log`（Py + R worker） |
 | resume | `is_run_complete` 仅认 success；infra/timeout 重试（`tests/test_highdim_batch.py` 覆盖） |
 | timeout | `run_batch --wall-time-cap` 经 subprocess `TimeoutExpired` → status=timeout（本 pilot 全 success 未触发，单测覆盖） |
@@ -63,3 +63,12 @@ Python 与 R worker 端到端一致。可进入 Gate E（E1 全量 1080 runs + �
 pilot 过程中发现并修复的 R worker 问题（见 commit）：metadata 数值字段为
 `_frepr` 字符串需 `as.numeric`；`seed` 32-bit 超 R integer max 需取模；
 source 顺序需显式含 `evaluation_budget.R` + `SMCO.R`；运行环境需 `jsonlite` + `qrng`。
+
+> **2026-07-29 更新（unified-output-contract）**：三种 worker（Py SMCO / R SMCO /
+> baseline）的 raw payload 已重构为统一详尽 outcome 契约（`paper_contract.OUTCOME_FIELDS`），
+> 新增 `best_so_far_trace`（改进点序列，供 anytime/ECDF 任意分辨率重算）与嵌入 `task`；
+> 缺失值统一 `null`（R `na="null"`）。`result_row` 不再由 worker 产出，改由
+> `src/smco/merge_results.py` 从 outcome + frozen manifest task 单点构建（Task 11），
+> 消除了原为 R 重建、为 baseline bypass 的两条特殊路径。本机 R 端到端已重验
+>（`/tmp/verify_r_outcome.py`：trace 落盘 OK，target 未命中为 null）。历史 pilot 未保留
+> raw，无数据需迁移（E1 全量未启动）。
