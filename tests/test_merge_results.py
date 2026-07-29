@@ -1,6 +1,7 @@
 """Tests for the unified merge / provenance-audit step (Task 11, redesigned)."""
 from __future__ import annotations
 
+import csv
 import json
 
 from smco.experiment_manifests import (
@@ -18,6 +19,7 @@ from smco.merge_results import (
     baseline_row_from_outcome,
     build_task_index,
     classify_task,
+    merge,
     resolve_supersedes,
     smco_row_from_outcome,
 )
@@ -189,3 +191,51 @@ def test_audit_flags_duplicate_identity():
     audit = audit_payloads([row, dup], {task["run_id"]: task, "r_other": task})
     assert audit["passed"] is False
     assert any("duplicate" in c["name"] for c in audit["checks"])
+
+
+def _write(raw_dir, run_id, payload):
+    (raw_dir / f"{run_id}.json").write_text(json.dumps(payload))
+
+
+def test_merge_end_to_end_writes_all_artefacts(tmp_path):
+    task = _evo_task()
+    btask = _baseline_task()
+    manifest = freeze_manifest(build_manifest("e1_development", "synthetic_highdim", [task]))
+    bmanifest = freeze_manifest(build_manifest("e3_baselines_highdim", "synthetic_highdim", [btask]))
+    mp = tmp_path / "m.json"; mp.write_text(json.dumps(manifest))
+    bp = tmp_path / "bm.json"; bp.write_text(json.dumps(bmanifest))
+    raw = tmp_path / "raw"; raw.mkdir()
+    _write(raw, task["run_id"], _smco_outcome(task))
+    boc = {"run_id": btask["run_id"], "status": "success", "failure_reason": "none",
+        "fe_used": 20000, "fe_budget": 20000, "best_value": 0.4, "known_optimum": 0.0,
+        "normalized_gap": 0.4, "target_hit_fe": {"1e-1": 100, "1e-2": None, "1e-3": None, "1e-5": None},
+        "anytime": [], "best_so_far_trace": [], "termination_reason": "evaluation_budget",
+        "fe_counts_by_event": {}, "wall_time_sec": 1.0, "peak_memory_mb": None,
+        "machine_id": "h", "git_commit": "", "environment_hash": "env", "task": btask,
+        "algorithm_id": "DE", "supersedes_run_id": "none"}
+    _write(raw, btask["run_id"], boc)
+
+    merged = tmp_path / "merged"
+    summary = merge([mp, bp], [raw], merged)
+
+    all_rows = list(csv.DictReader(open(merged / "all_attempts.csv")))
+    valid = list(csv.DictReader(open(merged / "valid_runs.csv")))
+    missing = list(csv.DictReader(open(merged / "missing_runs.csv")))
+    assert len(all_rows) == 2
+    assert len(valid) == 2
+    assert {r["algorithm_id"] for r in valid} == {task["algorithm_id"], "DE"}
+    assert summary["audit"]["passed"] is True
+    assert merged.joinpath("provenance_audit.json").exists()
+    assert merged.joinpath("provenance_audit.md").exists()
+    assert merged.joinpath("anytime.csv").exists()
+
+
+def test_merge_reports_missing_runs(tmp_path):
+    task = _evo_task()
+    manifest = freeze_manifest(build_manifest("e1_development", "synthetic_highdim", [task]))
+    mp = tmp_path / "m.json"; mp.write_text(json.dumps(manifest))
+    raw = tmp_path / "raw"; raw.mkdir()
+    merge([mp], [raw], tmp_path / "merged")
+    missing = list(csv.DictReader(open(tmp_path / "merged" / "missing_runs.csv")))
+    assert len(missing) == 1
+    assert missing[0]["run_id"] == task["run_id"]

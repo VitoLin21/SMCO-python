@@ -8,6 +8,7 @@ audit and writes the ``merged/`` artefacts. See
 """
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 from typing import Iterable
@@ -269,6 +270,93 @@ def audit_payloads(rows: list[dict], task_index: dict[str, dict]) -> dict:
     }
 
 
+def load_raw_outcomes(raw_dirs: Iterable[str]):
+    """Yield (path, payload) for every <run_id>.json across raw_dirs."""
+    for raw_dir in raw_dirs:
+        for path in sorted(Path(raw_dir).glob("*.json")):
+            if path.name.startswith(".") or ".tmp" in path.name:
+                continue
+            try:
+                payload = json.loads(path.read_text())
+            except Exception:
+                continue
+            if isinstance(payload, dict) and "run_id" in payload:
+                yield path, payload
+
+
+def _write_csv(path: Path, columns, rows):
+    with open(path, "w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(columns))
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({c: row.get(c, "") for c in columns})
+
+
+def _audit_md(audit: dict) -> str:
+    lines = ["# Provenance Audit", "",
+             f"**Passed:** {audit['passed']}", f"**Rows:** {audit['n_rows']}", ""]
+    for c in audit["checks"]:
+        flag = "PASS" if c["passed"] else "FAIL"
+        lines.append(f"- [{flag}] {c['name']}")
+        for e in c["errors"]:
+            lines.append(f"    - {e}")
+    return "\n".join(lines) + "\n"
+
+
+def merge(manifest_paths, raw_dirs, merged_dir) -> dict:
+    """Load outcomes, build rows, resolve supersedes, audit, write merged/."""
+    merged_dir = Path(merged_dir)
+    merged_dir.mkdir(parents=True, exist_ok=True)
+    task_index = build_task_index(manifest_paths)
+
+    attempts: list[dict] = []
+    for _path, outcome in load_raw_outcomes(raw_dirs):
+        run_id = outcome["run_id"]
+        task = task_index.get(run_id)
+        if task is None:
+            continue  # orphan — recorded via coverage gap; row dropped here
+        if classify_task(task) == "smco":
+            attempts.append(smco_row_from_outcome(outcome, task, manifest_id=run_id))
+        else:
+            attempts.append(baseline_row_from_outcome(outcome, task, manifest_id=run_id))
+
+    valid, superseded = resolve_supersedes(attempts)
+    audit = audit_payloads(attempts, task_index)
+
+    # missing = manifest tasks with no raw outcome
+    have = {r["run_id"] for r in attempts}
+    missing = [{"run_id": t["run_id"], "stage": t["stage"], "function": t["function"],
+                "dimension": t["dimension"], "instance": t["instance"],
+                "algorithm_id": t.get("algorithm_id") or t.get("algorithm")}
+               for t in task_index.values() if t["run_id"] not in have]
+
+    # anytime long table from raw outcomes
+    anytime_rows = []
+    for _path, outcome in load_raw_outcomes(raw_dirs):
+        for a in outcome.get("anytime") or []:
+            anytime_rows.append({
+                "run_id": outcome["run_id"],
+                "checkpoint_fe": a.get("checkpoint_fe"),
+                "fe_used": a.get("fe_used"),
+                "best_value": a.get("best_value"),
+                "normalized_gap": a.get("normalized_gap"),
+            })
+
+    _write_csv(merged_dir / "all_attempts.csv", RESULT_COLUMNS, attempts)
+    _write_csv(merged_dir / "valid_runs.csv", RESULT_COLUMNS, valid)
+    _write_csv(merged_dir / "missing_runs.csv",
+               ("run_id", "stage", "function", "dimension", "instance", "algorithm_id"), missing)
+    _write_csv(merged_dir / "duplicate_runs.csv", RESULT_COLUMNS,
+               [r for r in attempts if r["run_id"] in superseded])
+    _write_csv(merged_dir / "anytime.csv",
+               ("run_id", "checkpoint_fe", "fe_used", "best_value", "normalized_gap"), anytime_rows)
+    (merged_dir / "provenance_audit.json").write_text(json.dumps(audit, indent=2))
+    (merged_dir / "provenance_audit.md").write_text(_audit_md(audit))
+
+    return {"n_attempts": len(attempts), "n_valid": len(valid),
+            "n_missing": len(missing), "audit": audit}
+
+
 __all__ = [
     "classify_task",
     "build_task_index",
@@ -276,4 +364,6 @@ __all__ = [
     "baseline_row_from_outcome",
     "resolve_supersedes",
     "audit_payloads",
+    "load_raw_outcomes",
+    "merge",
 ]
