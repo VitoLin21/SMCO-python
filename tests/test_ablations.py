@@ -104,3 +104,21 @@ def test_start_count_configs_three_tiers():
 def test_start_count_configs_non_evo_empty():
     from smco.ablations import start_count_configs
     assert start_count_configs("PY-BASE-SMCO", 1000) == []
+
+
+def test_build_start_count_ablation_manifest_per_dim(tmp_path):
+    cli = _load_ablations_cli()
+    import json
+    idx_path = tmp_path / "idx.json"
+    idx_path.write_text(json.dumps({"instances": [
+        {"function": "Rastrigin", "dimension": 1000, "instance_id": 0,
+         "artifact_dir": "art", "transform_sha256": "ih", "start_points_hash": "h8",
+         "extra_starts": {"16": {"hash": "h16"}, "32": {"hash": "h32"}}}]}))
+    manifest = cli.build_start_count_ablation_manifest(
+        winner="PY-SP-SMCO-EVO", functions=["Rastrigin"], dims=[1000], n_instances=1,
+        fe_budget_per_d=100, checkpoints_per_d=(100,), instances_index=idx_path)
+    assert manifest["frozen"] is True
+    ns = sorted({t["n_starts"] for t in manifest["tasks"]})
+    assert ns == [8, 16, 32]  # ceil(sqrt(1000)) = 32
+    by_n = {t["n_starts"]: t["start_points_hash"] for t in manifest["tasks"]}
+    assert by_n == {8: "h8", 16: "h16", 32: "h32"}

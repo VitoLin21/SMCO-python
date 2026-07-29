@@ -18,7 +18,7 @@ import json
 import sys
 from pathlib import Path
 
-from smco.ablations import ablation_configs
+from smco.ablations import ablation_configs, start_count_configs
 from smco.experiment_manifests import build_manifest, expand_tasks, freeze_manifest
 
 E6_FUNCTIONS = ("Rastrigin", "Ackley", "Rosenbrock")
@@ -66,9 +66,40 @@ def build_ablation_manifest(
     return manifest
 
 
+def build_start_count_ablation_manifest(
+    *, winner, functions, dims, n_instances, fe_budget_per_d,
+    checkpoints_per_d, instances_index=None, out_dir=None,
+):
+    """E6.1 start-count ablation: per-dim expand (ceil(sqrt(d)) is dimension-dependent)."""
+    index = load_instance_index(instances_index) if instances_index else None
+    all_tasks = []
+    for function in functions:
+        for dim in dims:
+            dim = int(dim)
+            configs = [cfg for _label, cfg in start_count_configs(winner, dim)]
+            if not configs:
+                raise ValueError(f"winner {winner!r} is not EVO; ablations are EVO-only")
+            all_tasks.extend(expand_tasks(
+                "e6_ablations", "synthetic_highdim", [function], [dim], n_instances, configs,
+                fe_budget_per_d=fe_budget_per_d, checkpoints_per_d=checkpoints_per_d,
+                instance_index=index,
+            ))
+    manifest = freeze_manifest(build_manifest("e6_ablations", "synthetic_highdim", all_tasks))
+    if out_dir is not None:
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "e6_ablations__synthetic_highdim.json").write_text(
+            json.dumps(manifest, indent=2, ensure_ascii=False))
+    return manifest
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--winner", default="PY-SP-SMCO-EVO", help="E1 winner algorithm_id.")
+    parser.add_argument(
+        "--dimension", default="schedule", choices=["strategy", "schedule", "start_count"],
+        help="E6 ablation dimension.",
+    )
     parser.add_argument("--functions", nargs="+", default=list(E6_FUNCTIONS))
     parser.add_argument("--dims", nargs="+", type=int, default=[1000, 3000, 5000])
     parser.add_argument("--n-instances", type=int, default=3)
@@ -79,16 +110,24 @@ def main(argv=None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="Report counts; write nothing.")
     args = parser.parse_args(argv)
 
-    manifest = build_ablation_manifest(
-        winner=args.winner, functions=args.functions, dims=args.dims,
-        n_instances=args.n_instances, fe_budget_per_d=args.fe_budget_per_d,
-        checkpoints_per_d=args.checkpoints_per_d, instances_index=args.instances_index,
-        out_dir=None if args.dry_run else args.out_dir,
-    )
-    n_configs = len(ablation_configs(args.winner))
+    out = None if args.dry_run else args.out_dir
+    if args.dimension == "start_count":
+        manifest = build_start_count_ablation_manifest(
+            winner=args.winner, functions=args.functions, dims=args.dims,
+            n_instances=args.n_instances, fe_budget_per_d=args.fe_budget_per_d,
+            checkpoints_per_d=args.checkpoints_per_d, instances_index=args.instances_index,
+            out_dir=out)
+        n_configs = len(start_count_configs(args.winner, int(args.dims[0])))
+    else:
+        manifest = build_ablation_manifest(
+            winner=args.winner, functions=args.functions, dims=args.dims,
+            n_instances=args.n_instances, fe_budget_per_d=args.fe_budget_per_d,
+            checkpoints_per_d=args.checkpoints_per_d, instances_index=args.instances_index,
+            out_dir=out)
+        n_configs = len(ablation_configs(args.winner))
     print(
-        f"ablation manifest: {len(manifest['tasks'])} tasks "
-        f"({n_configs} configs x {len(args.functions)} funcs x {len(args.dims)} dims "
+        f"ablation manifest ({args.dimension}): {len(manifest['tasks'])} tasks "
+        f"(~{n_configs} configs/dim x {len(args.functions)} funcs x {len(args.dims)} dims "
         f"x {args.n_instances} instances), frozen={manifest['frozen']}"
     )
     return 0
