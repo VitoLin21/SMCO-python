@@ -71,7 +71,7 @@ def test_run_baseline_task_rejects_unknown_algorithm():
 
 
 def test_baseline_names_are_the_strong_set():
-    assert set(BASELINE_NAMES) == {"DE", "GA", "PSO", "SA", "GenSA"}
+    assert set(BASELINE_NAMES) == {"DE", "GA", "PSO", "SA", "GenSA", "CMA-ES"}
 
 
 def test_run_baseline_batch_end_to_end(tmp_path):

@@ -165,6 +165,7 @@ from comparison.methods.sa import simulated_annealing
 from comparison.methods.de import differential_evo
 from comparison.methods.ga import genetic_algorithm, _select_tournament_parents
 from comparison.methods.pso import particle_swarm
+from comparison.methods.cmaes import cma_es
 
 
 class TestScipyMethods:
@@ -222,6 +223,22 @@ class TestGAPSO:
         parents_idx = _select_tournament_parents(fitness, np.random.default_rng(42), fitness.size)
         assert np.all((parents_idx >= 0) & (parents_idx < fitness.size))
         assert parents_idx.max() > 2
+
+
+class TestCMAES:
+    """Separable (diagonal) CMA-ES — the limited-memory high-dim baseline (A-10)."""
+
+    def test_minimize_sphere(self):
+        bl, bu = np.array([-5.0, -5.0]), np.array([5.0, 5.0])
+        starts = np.array([[2.0, 2.0], [-1.0, 1.0]])
+        result = cma_es(_sphere, bl, bu, start_points=starts,
+                        maximize=False, max_iter=600, seed=42)
+        assert result.f_optimal < 0.5
+        assert result.x_optimal.shape == (2,)
+
+    def test_registered(self):
+        assert "CMA-ES" in METHOD_REGISTRY
+        assert get_method("CMA-ES") is cma_es
 
 
 from comparison.domain_mod import modify_domain

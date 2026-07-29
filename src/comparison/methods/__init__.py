@@ -37,3 +37,4 @@ from . import sa as _sa  # noqa: F401
 from . import de as _de  # noqa: F401
 from . import ga as _ga  # noqa: F401
 from . import pso as _pso  # noqa: F401
+from . import cmaes as _cmaes  # noqa: F401

@@ -16,6 +16,7 @@ import numpy as np
 
 from .optimizer import global_stage_iter_max, smco, smco_br, smco_br_evo, smco_evo, smco_r, smco_r_evo
 from .paper_contract import parse_algorithm_id
+from comparison.methods.cmaes import cma_es
 from comparison.methods.de import differential_evo
 from comparison.methods.ga import genetic_algorithm
 from comparison.methods.gensa import gensa
@@ -68,6 +69,7 @@ _BASELINE_DISPATCH = {
     "PSO": particle_swarm,
     "SA": simulated_annealing,
     "GenSA": gensa,
+    "CMA-ES": cma_es,
 }
 
 

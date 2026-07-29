@@ -24,6 +24,7 @@ import time
 
 import numpy as np
 
+from comparison.methods.cmaes import cma_es
 from comparison.methods.de import differential_evo
 from comparison.methods.ga import genetic_algorithm
 from comparison.methods.gensa import gensa
@@ -39,6 +40,7 @@ _BASELINE_DISPATCH = {
     "PSO": particle_swarm,
     "SA": simulated_annealing,
     "GenSA": gensa,
+    "CMA-ES": cma_es,
 }
 
 _GAP_TARGETS = {"1e-1": 1e-1, "1e-2": 1e-2, "1e-3": 1e-3, "1e-5": 1e-5}

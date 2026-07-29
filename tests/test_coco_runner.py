@@ -92,6 +92,16 @@ def test_run_baseline_fe_hard_stop():
     assert res["evaluations"] <= 30
 
 
+def test_run_baseline_cma_es_smoke():
+    # A-10: CMA-ES baseline dispatches + respects the FE hard stop.
+    from smco.coco_runner import run_baseline_on_problem
+    p = _first_problem(5)
+    res = run_baseline_on_problem(p, algorithm_name="CMA-ES", fe_budget=200)
+    assert res["algorithm_id"] == "CMA-ES"
+    assert 0 < res["evaluations"] <= 200
+    assert isinstance(res["final_target_hit"], bool)
+
+
 def test_run_baseline_rejects_unknown():
     import pytest
     from smco.coco_runner import run_baseline_on_problem

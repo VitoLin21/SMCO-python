@@ -17,6 +17,11 @@ dependencies = [
 test = [
     "pytest>=7",
 ]
+paper = [
+    # E4/E5 COCO benchmarks + the limited-memory CMA-ES baseline (A-10).
+    "coco-experiment>=2.8.0",
+    "cma>=4.4.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
