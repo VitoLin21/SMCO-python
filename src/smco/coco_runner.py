@@ -217,4 +217,42 @@ def run_on_problem(
     }
 
 
-__all__ = ["problem_seed", "run_on_problem", "run_baseline_on_problem"]
+def _is_true(value) -> bool:
+    return str(value).strip().lower() in ("true", "1", "yes")
+
+
+def aggregate_instance_summary(rows, algorithms):
+    """Aggregate per-(function, dim) rows over instances (A-06).
+
+    Each (function, dimension, algorithm) collapses its instances into a
+    target-hit rate, mean best and instance count, instead of keeping only the
+    last instance (which silently dropped 4 of 5 instances). Returns
+    ``(out_rows, field_order)``. The instance-level data stays in the per-run
+    CSV; final ERT/ECDF aggregates are produced by the Task-12 analysis layer.
+    """
+    by_key: dict[tuple, dict[str, list]] = {}
+    for r in rows:
+        key = (int(r["function"]), int(r["dimension"]))
+        by_key.setdefault(key, {}).setdefault(r["algorithm_id"], []).append(r)
+    out = []
+    for (func, dim), algos in sorted(by_key.items()):
+        row = {"function": func, "dimension": dim}
+        for algo in algorithms:
+            recs = algos.get(algo, [])
+            n = len(recs)
+            row[f"{algo}_target_hit_rate"] = (
+                sum(1 for r in recs if _is_true(r.get("final_target_hit"))) / n if n else ""
+            )
+            bests = [float(r["best_observed_fvalue1"]) for r in recs
+                     if r.get("best_observed_fvalue1") not in ("", None)]
+            row[f"{algo}_mean_best"] = sum(bests) / len(bests) if bests else ""
+            row[f"{algo}_n_instances"] = n
+        out.append(row)
+    fields = (["function", "dimension"]
+              + [f"{a}_target_hit_rate" for a in algorithms]
+              + [f"{a}_mean_best" for a in algorithms]
+              + [f"{a}_n_instances" for a in algorithms])
+    return out, fields
+
+
+__all__ = ["problem_seed", "run_on_problem", "run_baseline_on_problem", "aggregate_instance_summary"]

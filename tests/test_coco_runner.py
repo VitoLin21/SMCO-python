@@ -113,3 +113,30 @@ def test_bbob_largescale_runner_small_subset(tmp_path):
     assert algos == {"PY-SP-SMCO-EVO", "PY-BASE-SMCO", "DE", "GA", "PSO", "SA", "GenSA"}
     assert all(int(r["evaluations"]) <= 50 * 5 for r in rows)
     assert (tmp_path / "bbob_largescale_summary.csv").exists()
+
+
+def test_aggregate_instance_summary_collapses_instances():
+    from smco.coco_runner import aggregate_instance_summary
+    rows = [
+        {"function": 1, "dimension": 5, "algorithm_id": "A", "final_target_hit": True, "best_observed_fvalue1": 1.0},
+        {"function": 1, "dimension": 5, "algorithm_id": "A", "final_target_hit": False, "best_observed_fvalue1": 2.0},
+        {"function": 1, "dimension": 5, "algorithm_id": "B", "final_target_hit": True, "best_observed_fvalue1": 0.5},
+    ]
+    out, fields = aggregate_instance_summary(rows, ["A", "B"])
+    assert len(out) == 1  # one (function, dim), instances aggregated
+    row = out[0]
+    assert row["A_target_hit_rate"] == 0.5  # 1 of 2 instances hit
+    assert row["A_mean_best"] == 1.5  # (1.0 + 2.0) / 2
+    assert row["A_n_instances"] == 2
+    assert row["B_target_hit_rate"] == 1.0
+    assert "A_target_hit_rate" in fields and "A_n_instances" in fields
+
+
+def test_aggregate_instance_summary_separates_dimensions():
+    from smco.coco_runner import aggregate_instance_summary
+    rows = [
+        {"function": 1, "dimension": 5, "algorithm_id": "A", "final_target_hit": True, "best_observed_fvalue1": 1.0},
+        {"function": 1, "dimension": 10, "algorithm_id": "A", "final_target_hit": False, "best_observed_fvalue1": 5.0},
+    ]
+    out, _ = aggregate_instance_summary(rows, ["A"])
+    assert len(out) == 2  # d5 and d10 are distinct rows

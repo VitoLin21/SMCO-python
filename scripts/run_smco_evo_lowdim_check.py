@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import cocoex  # noqa: E402
 
-from smco.coco_runner import run_on_problem  # noqa: E402
+from smco.coco_runner import aggregate_instance_summary, run_on_problem  # noqa: E402
 from smco.paper_contract import parse_algorithm_id  # noqa: E402
 
 _FAM_TOKEN = {"smco": "SMCO", "smco_refine": "SMCO-REFINE", "smco_boost_refine": "SMCO-BOOST-REFINE"}
@@ -85,23 +85,9 @@ def _write_csv(path, rows, fields):
 
 
 def _write_summary(path, rows, winner, base):
-    # Per (function, dimension): winner/base final_target_hit + best.
-    by_key: dict[tuple, dict] = {}
-    for r in rows:
-        key = (int(r["function"]), int(r["dimension"]))
-        by_key.setdefault(key, {})[r["algorithm_id"]] = r
-    out = []
-    for (func, dim), algos in sorted(by_key.items()):
-        w = algos.get(winner); b = algos.get(base)
-        out.append({
-            "function": func, "dimension": dim,
-            "winner_target_hit": w["final_target_hit"] if w else "",
-            "base_target_hit": b["final_target_hit"] if b else "",
-            "winner_best": w["best_observed_fvalue1"] if w else "",
-            "base_best": b["best_observed_fvalue1"] if b else "",
-        })
-    _write_csv(path, out, ("function", "dimension", "winner_target_hit",
-                           "base_target_hit", "winner_best", "base_best"))
+    # A-06: aggregate over instances instead of keeping only the last one.
+    out, fields = aggregate_instance_summary(rows, [winner, base])
+    _write_csv(path, out, fields)
 
 
 def main(argv=None) -> int:

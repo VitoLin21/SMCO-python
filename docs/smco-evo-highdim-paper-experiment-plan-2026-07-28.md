@@ -396,9 +396,12 @@ E2 与 E3 重复的 winner/base 结果只计算一次。
 
 - 冻结的 SMCO-EVO 赢家；
 - matched base；
-- E3 中预先定义的三个代表性强基线；名称必须在 E4 manifest
-  启动前写死；
-- 共 5 个配置。
+- E3 中预先定义的五个强基线：DE、GA、PSO、SA、GenSA；名称、版本和参数
+  必须在 E4 manifest 启动前写死；
+- 共 7 个配置。
+
+这是相对原 5 配置 E4 设计的增强：保留全部五个 E3 baseline，以增加外部基准的
+对照密度。该增强在确认性实验启动前冻结，不得由运行时 CLI 选择或删改 baseline。
 
 预算：
 
@@ -411,10 +414,12 @@ checkpoints = {100, 250, 500, 1000} * d FE
 总运行数：
 
 ```text
-360 problem instances x 5 configurations = 1800 runs
+360 problem instances x 7 configurations = 2520 runs
 ```
 
-E4 使用 COCO 官方 ERT、ECDF 和 target definitions 生成外部基准图。
+E4 使用 COCO 官方 ERT、ECDF 和 target definitions 生成外部基准图。原始结果必须
+保留到 instance level；汇总结果必须显式聚合每个 `(function, dimension, algorithm)`
+下的 5 个官方 instances，禁止以最后一个 instance 覆盖其余记录。
 
 ### E5：低维非退化检查
 

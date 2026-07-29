@@ -757,6 +757,11 @@ selection tie-break 必须逐条写入报告，不能只输出 winner 名称。
 6. 打印任务数、预计 FE、已完成数和缺失数；
 7. 只执行 manifest 中的 task。
 
+E4 的 manifest 固定为 7 个配置：冻结 winner、matched base，以及
+`DE`、`GA`、`PSO`、`SA`、`GenSA`。runner 不提供可改变 canonical baseline 集合的
+运行时参数；其 `summary` 必须从 instance-level raw results 显式聚合每个
+`(function, dimension, algorithm)` 的 5 个官方 instances，不能覆盖前序 instance。
+
 禁止 runner 根据已有结果动态：
 
 - 删除表现差的算法；
