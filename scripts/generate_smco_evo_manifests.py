@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -39,9 +40,9 @@ from smco.experiment_manifests import (
 E1_FUNCTIONS = ("Rastrigin", "Ackley", "Griewank", "Zakharov")
 
 
-def _starts_seed(function: str, dim: int, instance_id: int, stage: str) -> int:
-    """Stable seed for the shared start matrix, decorrelated from the transform seed."""
-    key = f"{stage}:starts:{function}:{dim}:{instance_id}"
+def _starts_seed(function: str, dim: int, instance_id: int, stage: str, n_starts: int = 8) -> int:
+    """Stable seed for a start matrix, decorrelated from the transform seed and across n_starts tiers."""
+    key = f"{stage}:starts:{function}:{dim}:{instance_id}:{n_starts}"
     return int(hashlib.sha256(key.encode("utf-8")).hexdigest()[:8], 16)
 
 
@@ -55,6 +56,12 @@ def _artifact_dir(out_dir: Path, function: str, dim: int, instance_id: int, stag
     return out_dir / "instances" / f"{stage}_{function}_d{dim}_i{instance_id}"
 
 
+def _resolve_n_starts(spec, dim: int) -> int:
+    if str(spec) == "sqrt":
+        return int(math.ceil(math.sqrt(dim)))
+    return int(spec)
+
+
 def build_instance_set(
     functions,
     dims,
@@ -63,13 +70,16 @@ def build_instance_set(
     stage: str,
     out_dir,
     n_starts: int = 8,
+    extra_n_starts=(),
     block_size: int | None = None,
     dry_run: bool = False,
 ) -> dict:
     """Materialise instance artifacts and return the instances index.
 
     ``stage`` selects the instance-id/seed namespace (``development`` vs
-    ``confirmatory``) so the two suites never share transforms.
+    ``confirmatory``) so the two suites never share transforms. ``extra_n_starts``
+    adds per-tier starts artifacts (entries like ``"16"`` or ``"sqrt"`` →
+    ``ceil(sqrt(dim))``) for the E6.1 start-count ablation.
     """
     out_dir = Path(out_dir)
     functions = list(functions)
@@ -85,6 +95,7 @@ def build_instance_set(
             "dims": dims,
             "n_instances": n_instances,
             "n_starts": n_starts,
+            "extra_n_starts": list(extra_n_starts),
             "instances_planned": total,
         }
 
@@ -98,10 +109,20 @@ def build_instance_set(
             for instance_id in range(n_instances):
                 instance = generate_instance(function, dim, instance_id, **gen_kwargs)
                 starts = _shared_starts(
-                    instance, n_starts, _starts_seed(function, dim, instance_id, stage)
+                    instance, n_starts,
+                    _starts_seed(function, dim, instance_id, stage, n_starts),
                 )
+                extra: dict = {}
+                for spec in extra_n_starts:
+                    n_tier = _resolve_n_starts(spec, dim)
+                    if n_tier == n_starts:
+                        continue
+                    extra[n_tier] = _shared_starts(
+                        instance, n_tier,
+                        _starts_seed(function, dim, instance_id, stage, n_tier),
+                    )
                 art_dir = _artifact_dir(out_dir, function, dim, instance_id, stage)
-                meta = write_instance_artifacts(instance, starts, art_dir)
+                meta = write_instance_artifacts(instance, starts, art_dir, extra_starts=extra)
                 entries.append(
                     {
                         "function": function,
@@ -113,6 +134,7 @@ def build_instance_set(
                         "known_optimum_value": meta["known_optimum_value"],
                         "transform_sha256": meta["transform_sha256"],
                         "file_hashes": meta["file_hashes"],
+                        "extra_starts": meta.get("extra_starts", {}),
                     }
                 )
 
@@ -121,6 +143,7 @@ def build_instance_set(
         "default_block_size": DEFAULT_BLOCK_SIZE,
         "stage": stage,
         "n_starts": n_starts,
+        "extra_n_starts": list(extra_n_starts),
         "functions": functions,
         "dims": dims,
         "n_instances": n_instances,
@@ -231,6 +254,10 @@ def main(argv=None) -> int:
     parser.add_argument("--n-instances", type=int, default=5, help="Instances per (function, dim).")
     parser.add_argument("--n-starts", type=int, default=8, help="Shared starts per instance.")
     parser.add_argument(
+        "--extra-n-starts", nargs="*", default=[],
+        help="Extra start-count tiers (e.g. 16 sqrt). sqrt → ceil(sqrt(dim)).",
+    )
+    parser.add_argument(
         "--block-size",
         type=int,
         default=None,
@@ -263,6 +290,7 @@ def main(argv=None) -> int:
             stage=args.suite_stage,
             out_dir=args.out_dir,
             n_starts=args.n_starts,
+            extra_n_starts=args.extra_n_starts,
             block_size=args.block_size,
             dry_run=args.dry_run,
         )

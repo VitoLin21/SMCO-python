@@ -251,3 +251,18 @@ def test_load_starts_missing_tier_raises(tmp_path):
     write_instance_artifacts(inst, np.zeros((8, 4)), tmp_path)
     with pytest.raises(FileNotFoundError):
         load_starts(tmp_path, 99)
+
+
+def test_build_instance_set_extra_starts(tmp_path):
+    import math
+    mod = _load_manifest_module()
+    idx = mod.build_instance_set(
+        ["Rastrigin"], [16], 1, stage="development", out_dir=tmp_path,
+        n_starts=8, extra_n_starts=("16", "sqrt"))
+    entry = idx["instances"][0]
+    sqrt_n = int(math.ceil(math.sqrt(16)))  # =4
+    assert "16" in entry["extra_starts"]            # explicit 16
+    assert str(sqrt_n) in entry["extra_starts"]     # sqrt tier resolved to 4
+    art = tmp_path / entry["artifact_dir"]
+    assert load_starts(art, 16).shape == (16, 16)
+    assert load_starts(art, sqrt_n).shape == (sqrt_n, 16)
