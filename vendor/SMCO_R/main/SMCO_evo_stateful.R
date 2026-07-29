@@ -177,6 +177,10 @@ run_evolutionary_states <- function(f, bounds_lower, bounds_upper, start_points,
         boundary - states[[i]]$birth_iteration, tol_conv, partial_option,
         use_runmax, budget = budget)
     }
+    # A-01 instrumentation: per-state iterations + cumulative FE just before
+    # elimination (mirrors Python _run_evolutionary_states).
+    pre_elim_iterations <- as.integer(sapply(states, function(s) s$iterations))
+    cumulative_fe <- if (!is.null(budget)) as.integer(ctx_evaluations(budget)) else NA_integer_
     vals <- sapply(states, state_ranking_value)
     ranked <- order(vals, decreasing = TRUE)
     n_elim <- .n_eliminate(length(states), elimination_rate)
@@ -206,7 +210,8 @@ run_evolutionary_states <- function(f, bounds_lower, bounds_upper, start_points,
       iteration = as.integer(boundary), strategy = evolution_strategy,
       state_semantics = "state_preserving",
       survivor_count = length(survivors_idx), eliminated_count = n_elim,
-      generated_count = generated_count, best_before = best_before)
+      generated_count = generated_count, best_before = best_before,
+      cumulative_fe = cumulative_fe, state_iterations = pre_elim_iterations)
   }
 
   results <- vector("list", length(states))
@@ -315,6 +320,9 @@ run_evolutionary_restarts <- function(f, bounds_lower, bounds_upper, start_point
       states[[i]] <- rec
     }
     update_archive()
+    # A-01 instrumentation (see run_evolutionary_states).
+    pre_elim_iterations <- as.integer(sapply(states, function(r) r$iterations))
+    cumulative_fe <- if (!is.null(budget)) as.integer(ctx_evaluations(budget)) else NA_integer_
     vals <- sapply(states, rank_val)
     ranked <- order(vals, decreasing = TRUE)
     n_elim <- .n_eliminate(length(states), elimination_rate)
@@ -342,7 +350,8 @@ run_evolutionary_restarts <- function(f, bounds_lower, bounds_upper, start_point
       state_semantics = "restart",
       survivor_count = length(survivors_idx), eliminated_count = n_elim,
       generated_count = generated_count,
-      best_before = if (length(ranked) > 0L) vals[ranked[1]] else NA_real_)
+      best_before = if (length(ranked) > 0L) vals[ranked[1]] else NA_real_,
+      cumulative_fe = cumulative_fe, state_iterations = pre_elim_iterations)
   }
 
   results <- vector("list", length(states))

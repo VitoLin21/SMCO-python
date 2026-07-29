@@ -14,7 +14,7 @@ from typing import Any
 
 import numpy as np
 
-from .optimizer import smco, smco_br, smco_br_evo, smco_evo, smco_r, smco_r_evo
+from .optimizer import global_stage_iter_max, smco, smco_br, smco_br_evo, smco_evo, smco_r, smco_r_evo
 from .paper_contract import parse_algorithm_id
 from comparison.methods.de import differential_evo
 from comparison.methods.ga import genetic_algorithm
@@ -169,7 +169,9 @@ def run_on_problem(
     span = problem.upper_bounds - problem.lower_bounds
     starts = problem.lower_bounds + rng.uniform(size=(n_starts, dim)) * span
 
-    iter_max = max(1, int(fe_budget) // (2 * dim + 1))
+    # Split the FE budget across n_starts (A-01) so the evolution boundaries
+    # reflect global, not single-trajectory, progress.
+    iter_max = global_stage_iter_max(fe_budget, n_starts, dim)
     control: dict = {
         "max_evals": int(fe_budget),
         "objective_sense": "maximize",

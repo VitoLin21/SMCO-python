@@ -26,7 +26,7 @@ from typing import Any
 import numpy as np
 
 from .highdim_instances import HighDimInstance
-from .optimizer import smco, smco_br, smco_br_evo, smco_evo, smco_r, smco_r_evo
+from .optimizer import smco, smco_br, smco_br_evo, smco_evo, smco_r, smco_r_evo, global_stage_iter_max
 from .paper_contract import NONE_TOKEN, parse_algorithm_id
 
 # Minimisation gap targets -> canonical CSV suffixes (paper_contract.RESULT_COLUMNS).
@@ -137,10 +137,11 @@ def run_task(
     starts = np.asarray(starts, dtype=float)
     initial_reference = float(np.median([instance.objective(s) for s in starts]))
 
-    # SMCO triggers evolution off iter_max (optimizer._evolution_boundaries), so
-    # size iter_max to the FE budget: one center-difference iteration costs about
-    # 2d+1 evaluations. max_evals remains the hard stop (fe_used <= fe_budget).
-    iter_max = max(1, fe_budget // (2 * dim + 1))
+    # SMCO triggers evolution off iter_max (optimizer._evolution_boundaries).
+    # Split the global FE budget across n_starts so every start advances before
+    # the first boundary and the boundaries land near 50%/75% of the budget
+    # (A-01). max_evals remains the hard stop (fe_used <= fe_budget).
+    iter_max = global_stage_iter_max(fe_budget, starts.shape[0], dim)
     control: dict[str, Any] = {
         "max_evals": fe_budget,
         "objective_sense": "maximize",

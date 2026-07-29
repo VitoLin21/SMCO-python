@@ -599,6 +599,26 @@ def _evolution_boundaries(iter_max: int, evolution_points: tuple[float, ...]) ->
     return sorted(set(boundary for boundary in boundaries if boundary < iter_max))
 
 
+def global_stage_iter_max(fe_budget: int, n_starts: int, dim: int) -> int:
+    """Per-trajectory ``iter_max`` that splits the global FE budget across starts.
+
+    One center-difference iteration costs ``2*dim + 1`` evaluations, so a
+    portfolio of ``n_starts`` trajectories consumes ~``n_starts * iter_max *
+    (2*dim+1)`` evaluations just to reach the first evolution boundary. Sizing
+    ``iter_max = fe_budget // (n_starts * (2*dim+1))`` keeps that within the task
+    budget so every initial state advances before the first boundary and the
+    evolution boundaries land near 50%/75% of the global FE (the hard
+    ``max_evals`` cap remains the backstop for replacement overhead).
+
+    This is the A-01 budget/scheduling fix (review 2026-07-30): the prior
+    ``fe_budget // (2*dim+1)`` sized the budget to a single trajectory and let
+    the hard cap starve most starts. Mirrored in the R worker
+    (``run_smco_evo_highdim_r.R``) and ``coco_runner``.
+    """
+    n = max(1, int(n_starts))
+    return max(1, int(fe_budget) // (n * (2 * int(dim) + 1)))
+
+
 def _initialize_smco_state(
     f: Objective,
     start_point: np.ndarray,
@@ -1142,6 +1162,13 @@ def _run_evolutionary_states(
                 ctx=ctx,
             )
 
+        # A-01 instrumentation: snapshot each active state's iteration count and
+        # the cumulative FE just before elimination, so the budget/scheduling
+        # contract (every initial state advances; boundaries ~ 50%/75% of B) is
+        # testable. This is observability only — not a control-flow change.
+        pre_elim_iterations = [int(state.iterations) for state in states]
+        cumulative_fe = int(ctx.evaluations) if ctx is not None else None
+
         ranked = sorted(states, key=lambda state: state.ranking_value(), reverse=True)
         n_eliminate = min(len(ranked) - 1, max(1, int(math.ceil(len(ranked) * elimination_rate))))
         survivors = ranked[: len(ranked) - n_eliminate]
@@ -1203,6 +1230,8 @@ def _run_evolutionary_states(
                 "generated_count": int(generated.shape[0]),
                 "best_before": best_before,
                 "best_after_generation": float(max(state.ranking_value() for state in states)),
+                "cumulative_fe": cumulative_fe,
+                "state_iterations": pre_elim_iterations,
             }
         )
 
@@ -1365,6 +1394,10 @@ def _run_evolutionary_restarts(
 
         _update_archive()
 
+        # A-01 instrumentation (see _run_evolutionary_states).
+        pre_elim_iterations = [int(rec["iterations"]) for rec in states]
+        cumulative_fe = int(ctx.evaluations) if ctx is not None else None
+
         ranked = sorted(states, key=_rank_value, reverse=True)
         n_eliminate = min(len(ranked) - 1, max(1, int(math.ceil(len(ranked) * elimination_rate))))
         survivors = ranked[: len(ranked) - n_eliminate]
@@ -1399,6 +1432,8 @@ def _run_evolutionary_restarts(
             "eliminated_count": len(eliminated),
             "generated_count": int(generated.shape[0]),
             "best_before": float(_rank_value(ranked[0])) if ranked else float("nan"),
+            "cumulative_fe": cumulative_fe,
+            "state_iterations": pre_elim_iterations,
         })
 
     # Final restart segment: advance every state from its anchor to iter_max.

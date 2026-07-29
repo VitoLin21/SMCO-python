@@ -117,7 +117,11 @@ tryCatch({
   # only need determinism, hence the modulo into R's integer range.
   .seed <- as.integer(as.numeric(.task$seed) %% 2147483647)
   .fe_budget <- as.integer(.task$fe_budget)
-  .iter_max <- max(1L, as.integer(.fe_budget %/% (2L * .dim + 1L)))
+  # A-01: split the global FE budget across n_starts so every start advances
+  # before the first evolution boundary and boundaries land near 50%/75% of B
+  # (mirrors Python global_stage_iter_max; max_evals stays the hard stop).
+  .n_starts <- nrow(.starts)
+  .iter_max <- max(1L, as.integer(.fe_budget %/% (.n_starts * (2L * .dim + 1L))))
   .ctrl <- list(iter_max = .iter_max, max_evals = .fe_budget,
                 objective_sense = "maximize", known_optimum = -.known_optimum,
                 seed = .seed, bounds_buffer = 0.05)
@@ -204,7 +208,8 @@ tryCatch({
     environment_hash = paste0("R-", R.version$major, ".", R.version$minor),
     task = .task,
     algorithm_id = .task$algorithm_id,
-    supersedes_run_id = "none"
+    supersedes_run_id = "none",
+    evolution_history = .r$evolution_history %||% list()
   )
 }, error = function(e) {
   .say(sprintf("[r-worker] INFRA_FAILURE %s: %s", class(e)[1], conditionMessage(e)))
