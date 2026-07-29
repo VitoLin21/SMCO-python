@@ -1,0 +1,115 @@
+"""COCO bbob runner for the E5 low-dim non-degradation check.
+
+Wraps a cocoex Problem as an SMCO objective (``g = -problem(x)``; cocoex is
+minimisation, SMCO maximises) and reuses the existing optimizer API — the SMCO
+core is not modified. cocoex records every evaluation via its observer; the
+runner returns the cocoex-accumulated metrics (best_observed_fvalue1,
+final_target_hit, evaluations). See
+``docs/superpowers/specs/2026-07-29-e5-lowdim-check-design.md``.
+"""
+from __future__ import annotations
+
+import hashlib
+from typing import Any
+
+import numpy as np
+
+from .optimizer import smco, smco_br, smco_br_evo, smco_evo, smco_r, smco_r_evo
+from .paper_contract import parse_algorithm_id
+
+_BASE_DISPATCH = {
+    ("python", "smco"): smco,
+    ("python", "smco_refine"): smco_r,
+    ("python", "smco_boost_refine"): smco_br,
+}
+_EVO_DISPATCH = {
+    ("python", "smco"): smco_evo,
+    ("python", "smco_refine"): smco_r_evo,
+    ("python", "smco_boost_refine"): smco_br_evo,
+}
+
+_DEFAULT_EVO_POINTS = (0.5, 0.75)
+_DEFAULT_ELIMINATION_RATE = 0.25
+_DEFAULT_DE_FACTOR = 0.8
+_DEFAULT_DE_CROSSOVER = 0.7
+_DEFAULT_STRATEGY = "rand1bin"
+_DEFAULT_REFINE_RATIO = 0.5
+
+
+def problem_seed(problem, n_starts: int = 8) -> int:
+    """Stable 32-bit seed derived from the cocoex problem id (order-independent)."""
+    key = f"{problem.id}:n{n_starts}"
+    return int(hashlib.sha256(key.encode("utf-8")).hexdigest()[:8], 16)
+
+
+def _select_algorithm(algorithm_id: str):
+    parsed = parse_algorithm_id(algorithm_id)
+    if parsed["language"] != "python":
+        raise ValueError(
+            f"coco_runner is Python-only; algorithm_id {algorithm_id!r} is "
+            f"{parsed['language']!r}. Convert R winners to their Py equivalent."
+        )
+    table = _EVO_DISPATCH if parsed["evolutionary"] else _BASE_DISPATCH
+    key = ("python", parsed["family"])
+    if key not in table:
+        raise ValueError(f"no Python dispatch for family={parsed['family']!r}")
+    return table[key], parsed
+
+
+def run_on_problem(
+    problem,
+    *,
+    algorithm_id: str,
+    fe_budget: int,
+    n_starts: int = 8,
+    seed: int | None = None,
+    observer: Any = None,
+) -> dict:
+    """Run one SMCO variant on a cocoex problem; return cocoex-accumulated metrics.
+
+    ``problem(x)`` is minimisation; SMCO maximises ``g = -problem(x)``. Each
+    evaluation is recorded by cocoex when an observer is attached. The returned
+    ``best_observed_fvalue1`` is the minimisation best found during this run.
+    """
+    if observer is not None:
+        problem.observe_with(observer)
+    dim = int(problem.dimension)
+    algorithm, parsed = _select_algorithm(algorithm_id)
+    if seed is None:
+        seed = problem_seed(problem, n_starts)
+    rng = np.random.default_rng(seed)
+    span = problem.upper_bounds - problem.lower_bounds
+    starts = problem.lower_bounds + rng.uniform(size=(n_starts, dim)) * span
+
+    iter_max = max(1, int(fe_budget) // (2 * dim + 1))
+    control: dict = {
+        "max_evals": int(fe_budget),
+        "objective_sense": "maximize",
+        "known_optimum": 0.0,  # SMCO convergence target; cocoex final_target_hit is authoritative
+        "iter_max": iter_max,
+        "seed": int(seed),
+    }
+    if parsed["family"] in ("smco_refine", "smco_boost_refine"):
+        control["refine_ratio"] = _DEFAULT_REFINE_RATIO
+    if parsed["evolutionary"]:
+        control["evolution_points"] = _DEFAULT_EVO_POINTS
+        control["elimination_rate"] = _DEFAULT_ELIMINATION_RATE
+        control["evolution_strategy"] = _DEFAULT_STRATEGY
+        control["de_factor"] = _DEFAULT_DE_FACTOR
+        control["de_crossover"] = _DEFAULT_DE_CROSSOVER
+        control["state_semantics"] = parsed["state_semantics"]
+
+    algorithm(lambda x: -problem(x), problem.lower_bounds, problem.upper_bounds, starts, **control)
+
+    return {
+        "algorithm_id": algorithm_id,
+        "function": int(problem.id_function),
+        "dimension": dim,
+        "instance": int(problem.id_instance),
+        "best_observed_fvalue1": float(problem.best_observed_fvalue1),
+        "final_target_hit": bool(problem.final_target_hit),
+        "evaluations": int(problem.evaluations),
+    }
+
+
+__all__ = ["problem_seed", "run_on_problem"]
