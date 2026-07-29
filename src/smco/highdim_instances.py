@@ -471,11 +471,36 @@ def load_instance(artifact_dir: str | Path) -> HighDimInstance:
     )
 
 
-def load_starts(artifact_dir: str | Path, n_starts: int = 8) -> np.ndarray:
+def starts_filename(artifact_dir: str | Path, n_starts: int = 8) -> str:
+    """Resolve the starts artifact filename for the requested n_starts tier.
+
+    The default tier (metadata ``n_starts``) lives in ``starts.csv.gz``; every
+    other tier lives in ``starts_n{N}.csv.gz``.
+    """
     artifact_dir = Path(artifact_dir)
-    if int(n_starts) == 8:
-        return _read_matrix_gz(artifact_dir / "starts.csv.gz")
-    path = artifact_dir / f"starts_n{int(n_starts)}.csv.gz"
+    default_n = 8
+    metadata_path = artifact_dir / "metadata.json"
+    if metadata_path.exists():
+        try:
+            default_n = int(json.loads(metadata_path.read_text()).get("n_starts", 8))
+        except Exception:
+            default_n = 8
+    if int(n_starts) == default_n:
+        return "starts.csv.gz"
+    return f"starts_n{int(n_starts)}.csv.gz"
+
+
+def load_starts(artifact_dir: str | Path, n_starts: int | None = None) -> np.ndarray:
+    """Load the starts matrix for a tier.
+
+    ``n_starts=None`` → the default tier (``starts.csv.gz``); a specific n →
+    ``starts_n{N}.csv.gz`` (or ``starts.csv.gz`` if it is the default tier).
+    """
+    artifact_dir = Path(artifact_dir)
+    if n_starts is None:
+        path = artifact_dir / "starts.csv.gz"
+    else:
+        path = artifact_dir / starts_filename(artifact_dir, n_starts)
     if not path.exists():
         raise FileNotFoundError(
             f"no starts artifact for n_starts={n_starts} in {artifact_dir}"
@@ -499,4 +524,5 @@ __all__ = [
     "write_instance_artifacts",
     "load_instance",
     "load_starts",
+    "starts_filename",
 ]

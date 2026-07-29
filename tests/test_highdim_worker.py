@@ -255,3 +255,29 @@ def test_run_task_file_rejects_instance_hash_mismatch(tmp_path):
     assert rc == 1
     payload = json.loads((tmp_path / "raw" / f"{task['run_id']}.json").read_text())
     assert payload["status"] == "infra_failure"
+
+
+def test_run_task_file_loads_extra_starts_tier(tmp_path):
+    cli = _load_worker_cli()
+    inst = generate_instance("Rastrigin", 4, 0, seed=1)
+    rng = np.random.default_rng(5)
+    span = inst.bounds_upper - inst.bounds_lower
+    starts8 = inst.bounds_lower + rng.uniform(size=(8, 4)) * span
+    starts16 = inst.bounds_lower + rng.uniform(size=(16, 4)) * span
+    art_dir = tmp_path / "instances" / "dev_Rastrigin_d4_i0"
+    meta = write_instance_artifacts(inst, starts8, art_dir, extra_starts={16: starts16})
+    cfg = build_algorithm_config("python", "smco", True, "state_preserving",
+        evolution_strategy="rand1bin", evolution_points=(0.5, 0.75),
+        elimination_rate=0.25, de_factor=0.8, de_crossover=0.7, n_starts=16)
+    task = build_task("e6_ablations", "synthetic_highdim", "Rastrigin", 4, 0, 0,
+        config=cfg, fe_budget=200, checkpoints=(100, 200), seed=42,
+        instance_artifact_dir="instances/dev_Rastrigin_d4_i0",
+        instance_hash=meta["transform_sha256"],
+        start_points_hash=meta["extra_starts"]["16"]["hash"])
+    (tmp_path / "task.json").write_text(json.dumps(task))
+    rc = cli.run_task_file(str(tmp_path / "task.json"), instance_root=str(tmp_path),
+                           result_dir=str(tmp_path / "raw"), log_dir=str(tmp_path / "logs"))
+    assert rc == 0
+    payload = json.loads((tmp_path / "raw" / f"{task['run_id']}.json").read_text())
+    assert payload["status"] == "success"
+    assert payload["task"]["n_starts"] == 16

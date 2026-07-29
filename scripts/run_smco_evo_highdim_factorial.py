@@ -32,7 +32,7 @@ for _var in (
 
 import numpy as np
 
-from smco.highdim_instances import load_instance, load_starts
+from smco.highdim_instances import load_instance, load_starts, starts_filename
 from smco.highdim_worker import run_task
 from smco.experiment_manifests import load_manifest, verify_manifest
 from smco.confirmatory import enforce_confirmatory, is_run_complete, plan_batch
@@ -91,10 +91,13 @@ def _verify_provenance(instance, starts: np.ndarray, inst_dir: Path, task: dict)
             )
     expected_starts_hash = task.get("start_points_hash")
     if expected_starts_hash:
-        actual = _sha256_file(inst_dir / "starts.csv.gz")
+        n_starts = int(task.get("n_starts", 8))
+        starts_file = starts_filename(inst_dir, n_starts)
+        actual = _sha256_file(inst_dir / starts_file)
         if actual != expected_starts_hash:
             raise ValueError(
-                f"start_points_hash mismatch: task={expected_starts_hash!r} artifact={actual!r}"
+                f"start_points_hash mismatch (n_starts={n_starts}): "
+                f"task={expected_starts_hash!r} artifact={actual!r}"
             )
     if starts.shape[1] != instance.dimension:
         raise ValueError(
@@ -159,7 +162,7 @@ def run_task_file(
     try:
         inst_dir = _resolve_instance_dir(Path(instance_root), task)
         instance = load_instance(inst_dir)
-        starts = load_starts(inst_dir)
+        starts = load_starts(inst_dir, n_starts=int(task.get("n_starts", 8)))
         _verify_provenance(instance, starts, inst_dir, task)
         payload = run_task(
             task, instance, starts,
