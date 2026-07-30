@@ -26,15 +26,18 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--selection-only", action="store_true", help="Run only the selection step.")
     parser.add_argument("--dry-run", action="store_true", help="No results needed; report rules + candidates.")
+    parser.add_argument("--merged-dir", default=None, help="merged/ dir (valid_runs.csv + provenance_audit.json): canonical selection input.")
+    parser.add_argument("--development", action="store_true", help="Allow raw --result-dir JSON (development only).")
     args = parser.parse_args(argv)
 
     if not args.selection_only:
         parser.error(
             "only --selection-only is implemented in Task 9; "
-            "full statistics (ECDF/ERT/bootstrap/figures) is Task 12"
+            "full statistics (ECDF/ERT/bootstrap/figures) is Task 12 (R-03)"
         )
 
-    summary = build_selection(args.result_dir, out_dir=args.out_dir, dry_run=args.dry_run)
+    summary = build_selection(args.result_dir, out_dir=args.out_dir, dry_run=args.dry_run,
+                              merged_dir=args.merged_dir, development=args.development)
     print(json.dumps(summary, indent=2, ensure_ascii=False))
     return 0
 

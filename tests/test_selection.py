@@ -184,6 +184,57 @@ def test_build_selection_records_selection_and_config_hash(tmp_path):
     assert loaded["selection_hash"] == summary["selection_hash"]
 
 
+def test_build_selection_raw_requires_development(tmp_path):
+    # R-05: reading raw result_dir JSON is development-only.
+    with pytest.raises(ValueError, match="development-only"):
+        build_selection(result_dir=tmp_path, out_dir=tmp_path, dry_run=False,
+                        candidates=[{"algorithm_id": "PY-SP-SMCO-EVO"}])
+
+
+def test_build_selection_merged_canonical(tmp_path):
+    # R-05: canonical selection reads merged/ (audit + valid_runs.csv).
+    import json as _json
+    from smco.merge_results import merge
+    from smco.experiment_manifests import (
+        build_algorithm_config, build_manifest, build_task, freeze_manifest,
+    )
+    cfg = build_algorithm_config("python", "smco", True, "state_preserving",
+        evolution_strategy="rand1bin", evolution_points=(0.5, 0.75),
+        elimination_rate=0.25, de_factor=0.8, de_crossover=0.7, n_starts=8)
+    task = build_task("e1_development", "synthetic_highdim", "Zakharov", 200, 0, 0,
+        config=cfg, fe_budget=200000, checkpoints=(50000,), seed=1,
+        instance_hash="ih", start_points_hash="sh")
+    manifest = freeze_manifest(build_manifest("e1_development", "synthetic_highdim", [task]))
+    (tmp_path / "m.json").write_text(_json.dumps(manifest))
+    raw = tmp_path / "raw"; raw.mkdir()
+    outcome = {"run_id": task["run_id"], "status": "success", "failure_reason": "none",
+        "fe_used": 199998, "fe_budget": 200000, "best_value": 1e-6, "known_optimum": 0.0,
+        "normalized_gap": 0.001, "target_hit_fe": {"1e-1": 100, "1e-2": 1000, "1e-3": None, "1e-5": None},
+        "anytime": [], "best_so_far_trace": [], "termination_reason": "evaluation_budget",
+        "fe_counts_by_event": {}, "wall_time_sec": 1.0, "peak_memory_mb": 1.0,
+        "machine_id": "h", "git_commit": "abc", "environment_hash": "env", "task": task,
+        "algorithm_id": task["algorithm_id"], "supersedes_run_id": "none"}
+    (raw / f"{task['run_id']}.json").write_text(_json.dumps(outcome))
+    merged = tmp_path / "merged"
+    merge([tmp_path / "m.json"], [raw], merged)
+    summary = build_selection(out_dir=tmp_path / "sel", merged_dir=merged,
+                              candidates=[{"algorithm_id": cfg["algorithm_id"]}])
+    assert summary["winner"] == cfg["algorithm_id"]
+
+
+def test_enforce_merged_completeness_rejects_incomplete():
+    # R-05: a candidate with no runs, or uneven coverage, must be rejected.
+    from smco.selection import _enforce_merged_completeness
+    with pytest.raises(ValueError, match="no runs"):
+        _enforce_merged_completeness(
+            {"A": [{"run_id": "r1"}], "B": []},
+            [{"algorithm_id": "A"}, {"algorithm_id": "B"}])
+    with pytest.raises(ValueError, match="incomplete coverage"):
+        _enforce_merged_completeness(
+            {"A": [{"run_id": "r1"}, {"run_id": "r2"}], "B": [{"run_id": "r3"}]},
+            [{"algorithm_id": "A"}, {"algorithm_id": "B"}])
+
+
 _ANALYZE = (
     Path(__file__).resolve().parent.parent / "scripts" / "analyze_smco_evo_highdim_paper.py"
 )

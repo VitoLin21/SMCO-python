@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Callable
 
 from .experiment_manifests import e1_algorithm_configs
-from .paper_contract import canonical_json, parse_algorithm_id
+from .paper_contract import NONE_TOKEN, canonical_json, parse_algorithm_id
 
 TARGETS = ("1e-1", "1e-2", "1e-3", "1e-5")
 
@@ -169,6 +169,72 @@ def _write_json(path, obj):
     path.write_text(json.dumps(obj, indent=2, ensure_ascii=False))
 
 
+def _merged_loader(merged_dir, candidates):
+    """Load E1 rows from merged/valid_runs.csv (R-05 canonical selection input).
+
+    Returns a {algorithm_id: [payload]} map shaped like :func:`_default_loader`,
+    rebuilding the target_hit_fe dict and scalar fields from the flat
+    RESULT_COLUMNS. Raises if provenance_audit.json did not pass.
+    """
+    merged_dir = Path(merged_dir)
+    audit_path = merged_dir / "provenance_audit.json"
+    if not audit_path.exists():
+        raise ValueError(f"merged audit not found: {audit_path}")
+    audit = json.loads(audit_path.read_text())
+    if not audit.get("passed"):
+        raise ValueError(
+            f"provenance audit did not pass (failed: {audit.get('failed_checks')}); "
+            f"selection refuses to freeze a winner over unaudited results"
+        )
+    rows = list(csv.DictReader(open(merged_dir / "valid_runs.csv")))
+    by_algo: dict[str, list] = {c["algorithm_id"]: [] for c in candidates}
+    for r in rows:
+        aid = r.get("algorithm_id")
+        if aid not in by_algo:
+            continue
+        th: dict[str, int] = {}
+        for t in TARGETS:
+            v = r.get(f"target_hit_fe_{t}")
+            if v not in ("", None, NONE_TOKEN):
+                try:
+                    th[t] = int(float(v))
+                except (TypeError, ValueError):
+                    pass
+        gap = r.get("normalized_gap")
+        wall = r.get("wall_time_sec")
+        dim = r.get("dimension")
+        by_algo[aid].append({
+            "status": r.get("status", "success"),
+            "dimension": int(float(dim)) if dim not in ("", None) else 1,
+            "normalized_gap": float(gap) if gap not in ("", None, NONE_TOKEN) else None,
+            "wall_time_sec": float(wall) if wall not in ("", None) else None,
+            "target_hit_fe": th,
+            "run_id": r.get("run_id"),
+            "task": {"configuration_hash": r.get("configuration_hash")},
+        })
+    return by_algo
+
+
+def _enforce_merged_completeness(runs_by_config, candidates):
+    """R-05: reject incomplete or duplicate E1 coverage before freezing a winner."""
+    errors: list[str] = []
+    missing = [c["algorithm_id"] for c in candidates if not runs_by_config.get(c["algorithm_id"])]
+    if missing:
+        errors.append(f"candidates with no runs: {missing}")
+    counts = {aid: len(r) for aid, r in runs_by_config.items() if r}
+    if counts:
+        n = max(counts.values())
+        incomplete = {aid: c for aid, c in counts.items() if c < n}
+        if incomplete:
+            errors.append(f"incomplete coverage (max={n}): {incomplete}")
+    all_ids = [r.get("run_id") for runs in runs_by_config.values() for r in runs if r.get("run_id")]
+    dup = sorted({i for i in all_ids if all_ids.count(i) > 1})
+    if dup:
+        errors.append(f"duplicate run_id in merged/: {dup}")
+    if errors:
+        raise ValueError("E1 merged input rejected: " + "; ".join(errors))
+
+
 def _fmt(value):
     if value is None:
         return ""
@@ -279,14 +345,22 @@ def _selection_hash(summary: dict) -> str:
 
 
 def build_selection(
-    result_dir,
+    result_dir=None,
     *,
     out_dir,
     dry_run: bool = False,
     candidates=None,
     loader: Callable | None = None,
+    merged_dir=None,
+    development: bool = False,
 ) -> dict:
-    """Run (or dry-run) selection and write the four outputs."""
+    """Run (or dry-run) selection and write the four outputs.
+
+    Canonical mode reads merged/ (``merged_dir``) and enforces the provenance
+    audit + complete, duplicate-free coverage before freezing a winner (R-05).
+    Reading raw ``result_dir`` JSON is development-only (``development=True``);
+    an explicit ``loader`` (test hook) bypasses both.
+    """
     candidates = candidates if candidates is not None else selection_candidates()
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -302,7 +376,18 @@ def build_selection(
         _write_report_dryrun(out_dir / "selection_report.md", summary)
         return summary
 
-    runs_by_config = (loader or _default_loader)(result_dir, candidates)
+    if merged_dir:
+        runs_by_config = _merged_loader(merged_dir, candidates)
+        _enforce_merged_completeness(runs_by_config, candidates)
+    elif loader is not None:
+        runs_by_config = loader(result_dir, candidates)
+    else:
+        if not development:
+            raise ValueError(
+                "reading raw result_dir is development-only; pass development=True "
+                "or supply merged_dir for canonical selection"
+            )
+        runs_by_config = _default_loader(result_dir, candidates)
     scored = {
         c["algorithm_id"]: score_config(runs_by_config.get(c["algorithm_id"], []))
         for c in candidates
