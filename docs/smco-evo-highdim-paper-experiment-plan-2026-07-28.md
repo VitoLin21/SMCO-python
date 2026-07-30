@@ -424,6 +424,19 @@ E4 使用 COCO 官方 ERT、ECDF 和 target definitions 生成外部基准图。
 保留到 instance level；汇总结果必须显式聚合每个 `(function, dimension, algorithm)`
 下的 5 个官方 instances，禁止以最后一个 instance 覆盖其余记录。
 
+#### R winner 的 COCO 解释边界（已冻结决策）
+
+COCO Python 接口可用，而本项目不实现 R COCO runner。若 E1 的冻结 winner 是 R
+实现，E4/E5 运行对应的 Python family/semantics port，并将该产物固定标记为
+**`Python port external check`**：
+
+- 它不是冻结 R winner 的直接外部验证，不能用来加强或泛化 R winner 的主结论；
+- R winner 的主证据仍仅来自 E2/E3 中的 R winner 与 matched R base；
+- `selection.json`、E4/E5 `provenance.json`、图表标题/表注和报告正文必须保存
+  original winner/language、实际 Python algorithm id，以及
+  `python_port_external_check=true`；
+- 若 winner 本身为 Python，E4/E5 才是冻结 winner 的直接外部验证。
+
 ### E5：低维非退化检查
 
 低维不是主结论，只检查“高维有效是否以低维系统退化为代价”。

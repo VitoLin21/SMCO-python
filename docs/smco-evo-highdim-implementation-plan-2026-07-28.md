@@ -762,6 +762,12 @@ E4 的 manifest 固定为 7 个配置：冻结 winner、matched base，以及
 运行时参数；其 `summary` 必须从 instance-level raw results 显式聚合每个
 `(function, dimension, algorithm)` 的 5 个官方 instances，不能覆盖前序 instance。
 
+R winner 不实现 R COCO runner。E4/E5 若接收 R winner，只能执行对应 Python port，
+并在 selection、manifest/provenance、CSV/图表和最终报告中写入
+`python_port_external_check=true`、original winner/language 与实际 Python id；该
+结果不得作为 R winner 的直接外部验证或并入其主结论。Python winner 的 E4/E5 才可
+标作冻结实现的外部验证。
+
 禁止 runner 根据已有结果动态：
 
 - 删除表现差的算法；
