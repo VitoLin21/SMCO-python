@@ -73,6 +73,8 @@ def test_lowdim_runner_small_subset(tmp_path):
     assert prov["winner"] == "PY-SP-SMCO-EVO"
     assert prov["matched_base"] == "PY-BASE-SMCO"
     assert prov["original_language"] == "python"
+    assert prov["external_check_kind"] == "frozen_winner"
+    assert prov["is_frozen_winner_validation"] is True
 
 
 def test_run_baseline_on_problem_smoke():
@@ -176,4 +178,47 @@ def test_lowdim_r_winner_records_language_note(tmp_path):
     assert prov["original_language"] == "r"
     assert prov["original_winner"] == "R-SP-SMCO-EVO"
     assert prov["winner"] == "PY-SP-SMCO-EVO"  # Py equivalent actually run
-    assert "R cocoex unavailable" in prov["language_note"]
+    assert prov["external_check_kind"] == "python_port_external"
+    assert prov["is_frozen_winner_validation"] is False
+    assert "Python port external check" in prov["language_note"]
+    assert "NOT the frozen" in prov["language_note"]
+
+
+def test_lowdim_main_manifest_mode_reads_winner(tmp_path):
+    # R-04: canonical E5 reads the winner from a frozen manifest (+ selection).
+    import importlib.util
+    import json as _json
+    from pathlib import Path
+    from smco.confirmatory import build_confirmatory_manifest
+    spec = importlib.util.spec_from_file_location(
+        "lowdim_cli_m", Path("scripts/run_smco_evo_lowdim_check.py"))
+    cli = importlib.util.module_from_spec(spec); spec.loader.exec_module(cli)
+    sel = {"winner": "PY-SP-SMCO-EVO", "winner_language": "python",
+           "selection_hash": "s1", "winner_config_hash": "cfg_x"}
+    manifest = build_confirmatory_manifest(
+        sel, stage="e5_lowdim_check", suite="bbob", functions=["Rastrigin"],
+        dims=[5], n_instances=1, fe_budget_per_d=50, checkpoints_per_d=(50,))
+    # use the real winner_config_hash the builder computed so the gate matches
+    sel["winner_config_hash"] = manifest["winner_config_hash"]
+    (tmp_path / "manifest.json").write_text(_json.dumps(manifest))
+    (tmp_path / "selection.json").write_text(_json.dumps(sel))
+    result_dir = tmp_path / "out"
+    rc = cli.main(["--manifest", str(tmp_path / "manifest.json"),
+                   "--selection", str(tmp_path / "selection.json"),
+                   "--dims", "5", "--instances", "1", "--fe-budget-per-d", "50",
+                   "--result-dir", str(result_dir)])
+    assert rc == 0
+    prov = _json.loads((result_dir / "provenance.json").read_text())
+    assert prov["winner"] == "PY-SP-SMCO-EVO"
+
+
+def test_lowdim_main_free_winner_requires_development(tmp_path):
+    # R-04: free --winner is rejected unless --development acknowledges it.
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        "lowdim_cli_d", Path("scripts/run_smco_evo_lowdim_check.py"))
+    cli = importlib.util.module_from_spec(spec); spec.loader.exec_module(cli)
+    with pytest.raises(SystemExit):
+        cli.main(["--winner", "PY-SP-SMCO-EVO", "--dims", "5", "--instances", "1",
+                  "--fe-budget-per-d", "50", "--result-dir", str(tmp_path / "out")])

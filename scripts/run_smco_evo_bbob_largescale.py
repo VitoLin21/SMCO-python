@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from smco.coco_runner import (  # noqa: E402
     run_on_problem,
     write_run_provenance,
 )
+from smco.confirmatory import enforce_confirmatory  # noqa: E402
 from smco.paper_contract import parse_algorithm_id  # noqa: E402
 
 _FAM_TOKEN = {"smco": "SMCO", "smco_refine": "SMCO-REFINE", "smco_boost_refine": "SMCO-BOOST-REFINE"}
@@ -59,12 +61,21 @@ def run_bbob_largescale(*, winner, suite, dims, instances, fe_budget_per_d,
     winner_py = to_py(winner)
     base = matched_base(winner_py)
     smco_algos = [winner_py, base]
-    # A-04: never silently swap an R winner for its Py equivalent on COCO.
+    # R-01: never silently swap an R winner for its Py equivalent on COCO. A Py
+    # winner is the frozen winner's own external validation; an R winner is only
+    # a "Python port external check" and must not back its main claim.
     original_language = parse_algorithm_id(winner)["language"]
     language_note = None
+    external_check_kind = "frozen_winner"
+    is_frozen_winner_validation = True
     if original_language != "python":
-        language_note = (f"{original_language} winner evaluated via the Py equivalent "
-                         f"{winner_py!r} on COCO (R cocoex unavailable)")
+        external_check_kind = "python_port_external"
+        is_frozen_winner_validation = False
+        language_note = (f"Python port external check: {winner_py!r} is the Py equivalent "
+                         f"of the frozen {original_language} winner, run on COCO because "
+                         f"{original_language} cocoex is unavailable. This is NOT the frozen "
+                         f"winner's own external validation; the {original_language} winner's "
+                         f"main claim must not rest on E4.")
         print(f"WARNING [E4]: {language_note}", file=sys.stderr)
     suite_obj = cocoex.Suite(
         suite,
@@ -94,7 +105,9 @@ def run_bbob_largescale(*, winner, suite, dims, instances, fe_budget_per_d,
                          algorithms=smco_algos + list(baselines), winner=winner_py, base=base,
                          suite=suite, dims=dims, instances=instances,
                          fe_budget_per_d=fe_budget_per_d, original_winner=winner,
-                         original_language=original_language, language_note=language_note)
+                         original_language=original_language, language_note=language_note,
+                         external_check_kind=external_check_kind,
+                         is_frozen_winner_validation=is_frozen_winner_validation)
     return {"n_runs": len(rows), "algorithms": smco_algos + list(baselines)}
 
 
@@ -113,9 +126,34 @@ def _write_summary(path, rows, algorithms):
     _write_csv(path, out, fields)
 
 
+def _resolve_winner_baselines(args, parser):
+    """R-04: canonical E4 reads algorithms from a frozen manifest; free
+    --winner/--baselines is development-only and must be acknowledged."""
+    if args.manifest:
+        manifest = json.loads(Path(args.manifest).read_text())
+        if args.selection:
+            sel = json.loads(Path(args.selection).read_text())
+            enforce_confirmatory(manifest, selection=sel)
+        winner = manifest["winner_algorithm"]
+        baselines = manifest.get("baseline_algorithms") or list(BASELINES)
+        return winner, baselines
+    if not args.winner:
+        parser.error("canonical E4 requires --manifest (+ --selection); "
+                     "or use --development with --winner")
+    if not args.development:
+        parser.error("free --winner/--baselines is development-only; pass "
+                     "--development to acknowledge the output is not confirmatory")
+    print("WARNING [E4]: development mode (free --winner/--baselines) — "
+          "output is NOT confirmatory.", file=sys.stderr)
+    return args.winner, args.baselines
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--winner", required=True, help="Frozen E1 winner algorithm_id (Py or R; R auto-converted).")
+    parser.add_argument("--winner", default=None, help="Frozen E1 winner (development mode; canonical uses --manifest).")
+    parser.add_argument("--manifest", default=None, help="Frozen confirmatory manifest: read winner/baselines (canonical E4).")
+    parser.add_argument("--selection", default=None, help="selection.json to verify --manifest (canonical E4).")
+    parser.add_argument("--development", action="store_true", help="Allow free --winner/--baselines; output is flagged development, not confirmatory.")
     parser.add_argument("--suite", default="bbob-largescale", help="cocoex suite name (default bbob-largescale).")
     parser.add_argument("--dims", nargs="+", type=int, default=[160, 320, 640])
     parser.add_argument("--instances", nargs="+", type=int, default=[1, 2, 3, 4, 5])
@@ -128,9 +166,10 @@ def main(argv=None) -> int:
         print("ERROR: cocoex not installed. Install with: pip install coco-experiment", file=sys.stderr)
         return 2
 
+    winner, baselines = _resolve_winner_baselines(args, parser)
     summary = run_bbob_largescale(
-        winner=args.winner, suite=args.suite, dims=args.dims, instances=args.instances,
-        fe_budget_per_d=args.fe_budget_per_d, result_dir=args.result_dir, baselines=args.baselines)
+        winner=winner, suite=args.suite, dims=args.dims, instances=args.instances,
+        fe_budget_per_d=args.fe_budget_per_d, result_dir=args.result_dir, baselines=baselines)
     print(f"E4 bbob-largescale: {summary['n_runs']} runs "
           f"({', '.join(summary['algorithms'])}) -> {args.result_dir}/bbob_largescale.csv")
     return 0

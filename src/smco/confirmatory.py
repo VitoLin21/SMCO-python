@@ -107,6 +107,9 @@ def build_confirmatory_manifest(
     manifest["winner_config_hash"] = winner_cfg["configuration_hash"]
     manifest["matched_base_config_hash"] = base_cfg["configuration_hash"]
     manifest["allowed_algorithms"] = allowed
+    manifest["winner_algorithm"] = winner_cfg["algorithm_id"]
+    manifest["matched_base_algorithm"] = base_cfg["algorithm_id"]
+    manifest["baseline_algorithms"] = list(baselines)
     manifest["winner_language"] = language
     return freeze_manifest(manifest)
 
