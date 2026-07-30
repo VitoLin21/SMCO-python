@@ -25,6 +25,11 @@ def main(argv=None) -> int:
         help="merged/ dir (valid_runs.csv + provenance_audit.json): canonical selection/statistics input.",
     )
     parser.add_argument(
+        "--e1-manifest", dest="e1_manifest", nargs="+", default=None,
+        help="Frozen E1 manifest path(s); required by canonical --selection-only --merged-dir to "
+             "validate stage, run_ids and per-candidate task count (R5b).",
+    )
+    parser.add_argument(
         "--out-dir",
         default="result/smco-evo-paper-highdim-2026/analysis",
         help="Where to write selection.* / primary_table outputs.",
@@ -49,7 +54,8 @@ def main(argv=None) -> int:
         parser.error("use --selection-only or --statistics")
 
     summary = build_selection(args.result_dir, out_dir=args.out_dir, dry_run=args.dry_run,
-                              merged_dir=args.merged_dir, development=args.development)
+                              merged_dir=args.merged_dir, e1_manifest_paths=args.e1_manifest,
+                              development=args.development)
     print(json.dumps(summary, indent=2, ensure_ascii=False))
     return 0
 

@@ -218,6 +218,7 @@ def test_build_selection_merged_canonical(tmp_path):
     merged = tmp_path / "merged"
     merge([tmp_path / "m.json"], [raw], merged)
     summary = build_selection(out_dir=tmp_path / "sel", merged_dir=merged,
+                              e1_manifest_paths=[tmp_path / "m.json"],
                               candidates=[{"algorithm_id": cfg["algorithm_id"]}])
     assert summary["winner"] == cfg["algorithm_id"]
 
@@ -233,6 +234,117 @@ def test_enforce_merged_completeness_rejects_incomplete():
         _enforce_merged_completeness(
             {"A": [{"run_id": "r1"}, {"run_id": "r2"}], "B": [{"run_id": "r3"}]},
             [{"algorithm_id": "A"}, {"algorithm_id": "B"}])
+
+
+# --- R5b: canonical selection must validate the E1 manifest, stage and exact task set ---
+
+def _e1_merged_csv(tmp_path, rows):
+    import csv
+    import json as _json
+    fields = ["algorithm_id", "stage", "run_id", "configuration_hash", "dimension",
+              "status", "normalized_gap", "wall_time_sec", "fe_budget",
+              "target_hit_fe_1e-1", "target_hit_fe_1e-2", "target_hit_fe_1e-3", "target_hit_fe_1e-5"]
+    merged = tmp_path / "merged"
+    merged.mkdir(exist_ok=True)
+    with open(merged / "valid_runs.csv", "w", newline="") as h:
+        w = csv.DictWriter(h, fieldnames=fields)
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+    (merged / "provenance_audit.json").write_text(
+        _json.dumps({"passed": True, "failed_checks": []}))
+    return merged
+
+
+def _e1_manifest_file(tmp_path, name, tasks):
+    import json as _json
+    from smco.experiment_manifests import build_manifest, freeze_manifest
+    m = freeze_manifest(build_manifest("e1_development", "synthetic_highdim", tasks))
+    path = tmp_path / name
+    path.write_text(_json.dumps(m))
+    return path
+
+
+def _e1_task(aid, cfg_hash, run_id, *, instance=0):
+    return {"algorithm_id": aid, "configuration_hash": cfg_hash, "run_id": run_id,
+            "stage": "e1_development", "suite": "synthetic_highdim", "function": "Rastrigin",
+            "dimension": 200, "instance": instance, "replication": 0, "seed": 1,
+            "language": "python", "family": "smco", "evolutionary": "true",
+            "state_semantics": "state_preserving", "evolution_strategy": "rand1bin",
+            "n_starts": 8, "fe_budget": 200000, "checkpoints": [200000]}
+
+
+def _e1_row(aid, run_id, cfg_hash, *, stage="e1_development"):
+    return {"algorithm_id": aid, "stage": stage, "run_id": run_id,
+            "configuration_hash": cfg_hash, "dimension": 200, "status": "success",
+            "normalized_gap": 0.01, "wall_time_sec": 1.0, "fe_budget": 200000,
+            "target_hit_fe_1e-1": "100", "target_hit_fe_1e-2": "",
+            "target_hit_fe_1e-3": "", "target_hit_fe_1e-5": ""}
+
+
+def test_build_selection_canonical_requires_e1_manifest(tmp_path):
+    # R5b: canonical selection over merged/ requires the E1 manifest to validate.
+    aid = "PY-SP-SMCO-EVO"
+    merged = _e1_merged_csv(tmp_path, [_e1_row(aid, "r1", "cfgA")])
+    with pytest.raises(ValueError, match="e1_manifest"):
+        build_selection(out_dir=tmp_path / "sel", merged_dir=merged,
+                        candidates=[{"algorithm_id": aid}])
+
+
+def test_build_selection_canonical_with_manifest_validates_and_picks(tmp_path):
+    aid = "PY-SP-SMCO-EVO"
+    mpath = _e1_manifest_file(tmp_path, "m.json", [_e1_task(aid, "cfgA", "r1")])
+    merged = _e1_merged_csv(tmp_path, [_e1_row(aid, "r1", "cfgA")])
+    summary = build_selection(out_dir=tmp_path / "sel", merged_dir=merged,
+                              e1_manifest_paths=[mpath],
+                              candidates=[{"algorithm_id": aid}])
+    assert summary["winner"] == aid
+    assert summary.get("e1_manifest_validated") is True
+
+
+def test_build_selection_rejects_mixed_stage_contamination(tmp_path):
+    # R5b: an e1 row + an equal-count e2 row for the same candidate must be
+    # rejected (the old "coverage equal" check would have passed this).
+    aid = "PY-SP-SMCO-EVO"
+    mpath = _e1_manifest_file(tmp_path, "m.json", [_e1_task(aid, "cfgA", "r1")])
+    rows = [_e1_row(aid, "r1", "cfgA"),
+            _e1_row(aid, "r2", "cfgA", stage="e2_factorial_highdim")]
+    merged = _e1_merged_csv(tmp_path, rows)
+    with pytest.raises(ValueError, match="non-E1"):
+        build_selection(out_dir=tmp_path / "sel", merged_dir=merged,
+                        e1_manifest_paths=[mpath], candidates=[{"algorithm_id": aid}])
+
+
+def test_build_selection_rejects_wrong_task_count(tmp_path):
+    # R5b: manifest has 2 tasks but merged has 1 -> missing task -> reject
+    # (catches "each candidate equal count but not the planned N").
+    aid = "PY-SP-SMCO-EVO"
+    mpath = _e1_manifest_file(
+        tmp_path, "m.json", [_e1_task(aid, "cfgA", "r1"), _e1_task(aid, "cfgA", "r2", instance=1)])
+    merged = _e1_merged_csv(tmp_path, [_e1_row(aid, "r1", "cfgA")])
+    with pytest.raises(ValueError, match="missing"):
+        build_selection(out_dir=tmp_path / "sel", merged_dir=merged,
+                        e1_manifest_paths=[mpath], candidates=[{"algorithm_id": aid}])
+
+
+def test_build_selection_rejects_rows_not_in_manifest(tmp_path):
+    # R5b: a merged row whose run_id is not in the E1 manifest -> extra -> reject.
+    aid = "PY-SP-SMCO-EVO"
+    mpath = _e1_manifest_file(tmp_path, "m.json", [_e1_task(aid, "cfgA", "r1")])
+    merged = _e1_merged_csv(tmp_path, [_e1_row(aid, "r1", "cfgA"), _e1_row(aid, "rX", "cfgA")])
+    with pytest.raises(ValueError, match="not in the E1 manifest"):
+        build_selection(out_dir=tmp_path / "sel", merged_dir=merged,
+                        e1_manifest_paths=[mpath], candidates=[{"algorithm_id": aid}])
+
+
+def test_build_selection_rejects_configuration_hash_mismatch(tmp_path):
+    # R5b: a run_id present in the manifest but a different configuration_hash.
+    aid = "PY-SP-SMCO-EVO"
+    mpath = _e1_manifest_file(tmp_path, "m.json", [_e1_task(aid, "cfgA", "r1")])
+    merged = _e1_merged_csv(tmp_path, [_e1_row(aid, "r1", "cfgDIFFERENT")])
+    with pytest.raises(ValueError, match="configuration_hash mismatch"):
+        build_selection(out_dir=tmp_path / "sel", merged_dir=merged,
+                        e1_manifest_paths=[mpath], candidates=[{"algorithm_id": aid}])
 
 
 _ANALYZE = (

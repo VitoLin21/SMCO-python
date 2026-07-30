@@ -26,7 +26,7 @@ import statistics
 from pathlib import Path
 from typing import Callable
 
-from .experiment_manifests import e1_algorithm_configs
+from .experiment_manifests import e1_algorithm_configs, load_manifest
 from .paper_contract import NONE_TOKEN, canonical_json, parse_algorithm_id
 
 TARGETS = ("1e-1", "1e-2", "1e-3", "1e-5")
@@ -169,12 +169,13 @@ def _write_json(path, obj):
     path.write_text(json.dumps(obj, indent=2, ensure_ascii=False))
 
 
-def _merged_loader(merged_dir, candidates):
+def _merged_loader(merged_dir, candidates, *, expected_stage="e1_development"):
     """Load E1 rows from merged/valid_runs.csv (R-05 canonical selection input).
 
-    Returns a {algorithm_id: [payload]} map shaped like :func:`_default_loader`,
-    rebuilding the target_hit_fe dict and scalar fields from the flat
-    RESULT_COLUMNS. Raises if provenance_audit.json did not pass.
+    Returns ``(by_algo, dropped_other_stage)`` where ``by_algo`` is a
+    {algorithm_id: [payload]} map shaped like :func:`_default_loader` and
+    ``dropped_other_stage`` lists candidate rows whose stage is not the expected
+    E1 stage (R5b isolation). Raises if provenance_audit.json did not pass.
     """
     merged_dir = Path(merged_dir)
     audit_path = merged_dir / "provenance_audit.json"
@@ -188,9 +189,13 @@ def _merged_loader(merged_dir, candidates):
         )
     rows = list(csv.DictReader(open(merged_dir / "valid_runs.csv")))
     by_algo: dict[str, list] = {c["algorithm_id"]: [] for c in candidates}
+    dropped_other_stage: list[dict] = []
     for r in rows:
         aid = r.get("algorithm_id")
         if aid not in by_algo:
+            continue
+        if r.get("stage") != expected_stage:
+            dropped_other_stage.append(r)  # R5b: other-stage rows are isolated, not scored
             continue
         th: dict[str, int] = {}
         for t in TARGETS:
@@ -210,9 +215,68 @@ def _merged_loader(merged_dir, candidates):
             "wall_time_sec": float(wall) if wall not in ("", None) else None,
             "target_hit_fe": th,
             "run_id": r.get("run_id"),
-            "task": {"configuration_hash": r.get("configuration_hash")},
+            "task": {"configuration_hash": r.get("configuration_hash"),
+                     "instance_hash": r.get("instance_hash")},
         })
-    return by_algo
+    return by_algo, dropped_other_stage
+
+
+def _load_e1_manifest_index(e1_manifest_paths) -> dict[str, dict[str, dict]]:
+    """{algorithm_id: {run_id: task}} from the frozen E1 manifests (R5b)."""
+    index: dict[str, dict[str, dict]] = {}
+    for path in e1_manifest_paths:
+        manifest = load_manifest(path)
+        for task in manifest.get("tasks", []):
+            aid = task.get("algorithm_id")
+            rid = task.get("run_id")
+            if aid and rid:
+                index.setdefault(aid, {})[rid] = task
+    return index
+
+
+def _enforce_e1_manifest_closure(runs_by_config, candidates, e1_index, dropped_other_stage):
+    """R5b: each candidate must carry EXACTLY its E1 manifest task set (matching
+    run_ids + configuration_hash), and the merged input must be free of
+    other-stage rows. A mixed-stage or wrong-count directory cannot freeze the
+    E1 winner.
+    """
+    errors: list[str] = []
+    if dropped_other_stage:
+        stages = sorted({r.get("stage") for r in dropped_other_stage})
+        errors.append(
+            f"merged input has {len(dropped_other_stage)} non-E1 row(s) "
+            f"(stages {stages}); canonical E1 selection refuses a contaminated input"
+        )
+    for c in candidates:
+        aid = c["algorithm_id"]
+        expected = e1_index.get(aid, {})
+        expected_ids = set(expected)
+        rows = runs_by_config.get(aid, [])
+        kept = [r.get("run_id") for r in rows]
+        kept_set = set(kept)
+        if len(kept) != len(kept_set):
+            errors.append(f"{aid}: duplicate run_id within E1 rows")
+        missing = sorted(expected_ids - kept_set)
+        extra = sorted(kept_set - expected_ids)
+        if missing:
+            errors.append(
+                f"{aid}: missing {len(missing)} of {len(expected_ids)} E1 task(s) "
+                f"({missing[:3]}); each candidate must carry exactly its manifest tasks")
+        if extra:
+            errors.append(
+                f"{aid}: {len(extra)} row(s) not in the E1 manifest ({extra[:3]})")
+        for r in rows:
+            rid = r.get("run_id")
+            mtask = expected.get(rid)
+            if not mtask:
+                continue
+            row_hash = (r.get("task") or {}).get("configuration_hash")
+            man_hash = mtask.get("configuration_hash")
+            if (row_hash and man_hash and row_hash not in (None, NONE_TOKEN)
+                    and man_hash not in (None, NONE_TOKEN) and row_hash != man_hash):
+                errors.append(f"{aid}/{rid}: configuration_hash mismatch vs E1 manifest")
+    if errors:
+        raise ValueError("E1 canonical selection rejected: " + "; ".join(errors))
 
 
 def _enforce_merged_completeness(runs_by_config, candidates):
@@ -352,14 +416,17 @@ def build_selection(
     candidates=None,
     loader: Callable | None = None,
     merged_dir=None,
+    e1_manifest_paths=None,
     development: bool = False,
 ) -> dict:
     """Run (or dry-run) selection and write the four outputs.
 
-    Canonical mode reads merged/ (``merged_dir``) and enforces the provenance
-    audit + complete, duplicate-free coverage before freezing a winner (R-05).
-    Reading raw ``result_dir`` JSON is development-only (``development=True``);
-    an explicit ``loader`` (test hook) bypasses both.
+    Canonical mode reads merged/ (``merged_dir``) AND the frozen E1 manifests
+    (``e1_manifest_paths``): it enforces the provenance audit, isolates/rejects
+    other-stage rows, and verifies each candidate carries EXACTLY its E1 manifest
+    task set (matching run_ids + configuration_hash) before freezing a winner
+    (R-05/R5b). Reading raw ``result_dir`` JSON is development-only
+    (``development=True``); an explicit ``loader`` (test hook) bypasses both.
     """
     candidates = candidates if candidates is not None else selection_candidates()
     out_dir = Path(out_dir)
@@ -376,16 +443,25 @@ def build_selection(
         _write_report_dryrun(out_dir / "selection_report.md", summary)
         return summary
 
+    e1_manifest_validated = False
     if merged_dir:
-        runs_by_config = _merged_loader(merged_dir, candidates)
-        _enforce_merged_completeness(runs_by_config, candidates)
+        if not e1_manifest_paths:
+            raise ValueError(
+                "canonical E1 selection requires e1_manifest_paths (the frozen E1 "
+                "manifests) to validate stage, run_ids and per-candidate task count; "
+                "pass development=True for raw result_dir exploration"
+            )
+        e1_index = _load_e1_manifest_index(e1_manifest_paths)
+        runs_by_config, dropped_other_stage = _merged_loader(merged_dir, candidates)
+        _enforce_e1_manifest_closure(runs_by_config, candidates, e1_index, dropped_other_stage)
+        e1_manifest_validated = True
     elif loader is not None:
         runs_by_config = loader(result_dir, candidates)
     else:
         if not development:
             raise ValueError(
                 "reading raw result_dir is development-only; pass development=True "
-                "or supply merged_dir for canonical selection"
+                "or supply merged_dir (+ e1_manifest_paths) for canonical selection"
             )
         runs_by_config = _default_loader(result_dir, candidates)
     scored = {
@@ -423,6 +499,7 @@ def build_selection(
         "coverage": coverage,
         "n_results": len(all_run_ids),
         "results_hash": results_hash,
+        "e1_manifest_validated": e1_manifest_validated,
         "rules": list(SELECTION_RULES),
     }
     summary["selection_hash"] = _selection_hash(summary)
