@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .paper_stats import bootstrap_ci, expected_running_time
+from .paper_stats import expected_running_time, hierarchical_bootstrap_ci
 from .selection import TARGETS, ecdf_auc
 
 _NAN_TOKENS = ("", None, "none", "nan", "None", "NaN")
@@ -43,8 +43,10 @@ def _row_to_payload(r: dict) -> dict:
     gap = r.get("normalized_gap")
     wall = r.get("wall_time_sec")
     dim = r.get("dimension")
+    function = r.get("function")
     return {
         "status": r.get("status", "success"),
+        "function": function if function not in _NAN_TOKENS else "_",
         "dimension": int(float(dim)) if dim not in _NAN_TOKENS else 1,
         "normalized_gap": float(gap) if gap not in _NAN_TOKENS else None,
         "wall_time_sec": float(wall) if wall not in _NAN_TOKENS else None,
@@ -53,8 +55,18 @@ def _row_to_payload(r: dict) -> dict:
     }
 
 
-def primary_table(rows: list[dict], algorithms) -> list[dict]:
-    """Per-algorithm primary statistics: ECDF-AUC, ERT per target, bootstrap CI."""
+# Pre-registered bootstrap size for the primary table (plan 6.3: >= 10,000).
+PRIMARY_BOOTSTRAPS = 10000
+
+
+def primary_table(rows: list[dict], algorithms, *, n_boot: int = PRIMARY_BOOTSTRAPS) -> list[dict]:
+    """Per-algorithm primary statistics: ECDF-AUC, ERT per target, bootstrap CI.
+
+    R3b (plan 6.3): the median log-gap CI is a function->instance hierarchical
+    bootstrap (resample functions, then instances within) with the pooled median
+    as the point estimate — not a flat bootstrap. ERT uses each run's OWN
+    ``fe_budget`` (not ``max(fe_budget)``), since E1 budget scales with dimension.
+    """
     by_algo: dict[str, list] = {a: [] for a in algorithms}
     for r in rows:
         aid = r.get("algorithm_id")
@@ -67,13 +79,19 @@ def primary_table(rows: list[dict], algorithms) -> list[dict]:
         if n == 0:
             out.append({"algorithm_id": aid, "n_runs": 0})
             continue
-        gaps = [r["normalized_gap"] for r in runs if r["normalized_gap"] is not None]
-        log_gaps = [float(np.log(max(g, 1e-12))) for g in gaps]
+        # hierarchical (function -> instance) bootstrap of the pooled median
+        by_func: dict[str, list[float]] = {}
+        for r in runs:
+            g = r["normalized_gap"]
+            if g is None:
+                continue
+            by_func.setdefault(r["function"], []).append(float(np.log(max(g, 1e-12))))
+        groups = list(by_func.values())
         point, lo, hi = (
-            bootstrap_ci(log_gaps, stat=np.median, n_boot=2000, seed=0)
-            if log_gaps else (None, None, None)
+            hierarchical_bootstrap_ci(groups, stat=np.median, n_boot=n_boot, seed=0, pool=True)
+            if groups else (None, None, None)
         )
-        budget = max((r["fe_budget"] for r in runs), default=0)
+        budgets = [r["fe_budget"] for r in runs]
         row: dict = {
             "algorithm_id": aid,
             "n_runs": n,
@@ -85,7 +103,7 @@ def primary_table(rows: list[dict], algorithms) -> list[dict]:
         }
         for t in TARGETS:
             row[f"ert_{t}"] = expected_running_time(
-                [r["target_hit_fe"].get(t) for r in runs], budget)
+                [r["target_hit_fe"].get(t) for r in runs], budgets)
         out.append(row)
     return out
 

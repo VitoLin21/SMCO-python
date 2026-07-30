@@ -17,19 +17,31 @@ import numpy as np
 TARGETS = ("1e-1", "1e-2", "1e-3", "1e-5")
 
 
-def expected_running_time(hit_fes: Sequence, budget: float) -> float:
+def expected_running_time(hit_fes: Sequence, budgets) -> float:
     """COCO-style Expected Running Time to reach one target.
 
     ``hit_fes`` are per-run FE values (a reached run's hit FE) or ``None``
-    (not reached / failure). Unreached runs contribute their full ``budget`` to
+    (not reached / failure). Unreached runs contribute their full FE budget to
     the total and are excluded from the reached denominator, so ERT grows toward
     infinity as fewer runs succeed. Returns ``inf`` when no run reached.
+
+    ``budgets`` is either a scalar FE budget (broadcast to every run) or a
+    per-run sequence: each unreached run then contributes its OWN budget
+    (R3b — E1 budget scales with dimension, so a shared ``max(fe_budget)`` would
+    inflate the ERT of smaller-dimension unreached runs).
     """
+    n = len(hit_fes)
+    if isinstance(budgets, (int, float)):
+        budgets = [float(budgets)] * n
+    elif len(budgets) != n:
+        raise ValueError(
+            f"expected_running_time: {len(budgets)} budgets vs {n} hit_fes")
     reached = [f for f in hit_fes if f is not None]
     n_reached = len(reached)
     if n_reached == 0:
         return math.inf
-    total = sum(reached) + sum(budget for f in hit_fes if f is None)
+    unreached_cost = sum(b for f, b in zip(hit_fes, budgets) if f is None)
+    total = sum(reached) + unreached_cost
     return float(total) / n_reached
 
 
@@ -70,29 +82,47 @@ def hierarchical_bootstrap_ci(
     n_boot: int = 10000,
     ci: float = 0.95,
     seed: int = 0,
+    pool: bool = False,
 ):
     """Two-level (hierarchical) bootstrap: resample groups, then values within.
 
     ``groups`` is a sequence of per-group value lists (e.g. one list of instance
     gaps per function). This respects the nested design (function > instance)
     that a flat bootstrap would ignore. Returns ``(point, lo, hi)``.
+
+    ``pool=True`` reports the statistic on the POOLED observations (all values
+    across groups) as the point estimate, and each bootstrap replicate pools the
+    resampled groups before applying ``stat`` — the right choice when the table
+    reports a pooled median/mean but the CI must still respect function->instance
+    clustering (plan 6.3). The default (``pool=False``) applies ``stat`` to the
+    per-group statistics, which is exact for ``np.mean`` by linearity.
     """
     rng = np.random.default_rng(seed)
     groups = [np.asarray(g, dtype=float) for g in groups if len(g) > 0]
     if not groups:
         return (None, None, None)
     n_groups = len(groups)
-    group_stats = [float(stat(g)) for g in groups]
-    point = float(stat(group_stats))
+    if pool:
+        pooled = np.concatenate(groups)
+        point = float(stat(pooled))
 
-    def _one():
-        idx = rng.integers(0, n_groups, size=n_groups)
-        sampled = []
-        for i in idx:
-            g = groups[i]
-            sub = g[rng.integers(0, g.size, size=g.size)]
-            sampled.append(float(stat(sub)))
-        return float(stat(sampled))
+        def _one():
+            idx = rng.integers(0, n_groups, size=n_groups)
+            out = [groups[i][rng.integers(0, groups[i].size, size=groups[i].size)]
+                   for i in idx]
+            return float(stat(np.concatenate(out)))
+    else:
+        group_stats = [float(stat(g)) for g in groups]
+        point = float(stat(group_stats))
+
+        def _one():
+            idx = rng.integers(0, n_groups, size=n_groups)
+            sampled = []
+            for i in idx:
+                g = groups[i]
+                sub = g[rng.integers(0, g.size, size=g.size)]
+                sampled.append(float(stat(sub)))
+            return float(stat(sampled))
 
     boots = np.array([_one() for _ in range(n_boot)])
     alpha = (1.0 - ci) / 2.0

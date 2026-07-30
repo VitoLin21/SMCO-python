@@ -48,6 +48,51 @@ def test_primary_table_computes_ecdf_auc_and_ert(tmp_path):
     assert isinstance(a["median_log_gap"], float)
 
 
+def test_primary_table_ert_uses_per_run_budget_not_max():
+    # R3b: a mixed d/budget algorithm must use EACH run's own fe_budget for ERT,
+    # not max(fe_budget). Locks the inflation bug across dimensions.
+    from smco.paper_analysis import primary_table
+    rows = [
+        {"algorithm_id": "A", "dimension": 1000, "status": "success", "normalized_gap": 0.01,
+         "wall_time_sec": 1.0, "fe_budget": 1_000_000,
+         "target_hit_fe_1e-1": "500", "target_hit_fe_1e-2": "",
+         "target_hit_fe_1e-3": "", "target_hit_fe_1e-5": ""},
+        {"algorithm_id": "A", "dimension": 200, "status": "success", "normalized_gap": 0.5,
+         "wall_time_sec": 1.0, "fe_budget": 200_000,
+         "target_hit_fe_1e-1": "", "target_hit_fe_1e-2": "",
+         "target_hit_fe_1e-3": "", "target_hit_fe_1e-5": ""},
+    ]
+    table = primary_table(rows, ["A"], n_boot=200)
+    a = table[0]
+    # reached [500], unreached contributes its own 200_000 -> (500 + 200_000)/1
+    # the old max-budget path would give (500 + 1_000_000)/1 = 1_000_500
+    assert a["ert_1e-1"] == 200_500.0
+
+
+def test_primary_table_bootstrap_is_hierarchical_by_function():
+    # R3b: the median log-gap CI uses a function->instance hierarchical bootstrap
+    # (plan 6.3) with the pooled median as the point estimate. Choose values where
+    # the pooled median differs from the median of per-function medians.
+    import math
+    from smco.paper_analysis import primary_table
+
+    def row(func, gap):
+        return {"algorithm_id": "A", "function": func, "dimension": 200,
+                "status": "success", "normalized_gap": gap, "wall_time_sec": 1.0,
+                "fe_budget": 200000, "target_hit_fe_1e-1": "10", "target_hit_fe_1e-2": "",
+                "target_hit_fe_1e-3": "", "target_hit_fe_1e-5": ""}
+
+    rows = [row("F1", 1e-3), row("F1", 1e-1),
+            row("F2", 1.0), row("F2", 1.0), row("F2", 1.0)]
+    table = primary_table(rows, ["A"], n_boot=300)
+    a = table[0]
+    # pooled log-gaps sorted = [log(1e-3), log(1e-1), 0, 0, 0] -> median 0.0
+    # median of per-function medians = median([log(1e-2)~ -4.6, 0.0]) = -2.3 (would differ)
+    assert a["median_log_gap"] == pytest.approx(0.0, abs=1e-9)
+    assert a["median_log_gap_ci_lo"] is not None and a["median_log_gap_ci_hi"] is not None
+    assert a["median_log_gap_ci_lo"] <= a["median_log_gap"] <= a["median_log_gap_ci_hi"]
+
+
 def test_write_primary_table_csv(tmp_path):
     from smco.paper_analysis import write_primary_table
     rows = [{"algorithm_id": "A", "dimension": 200, "status": "success", "normalized_gap": 0.01,
