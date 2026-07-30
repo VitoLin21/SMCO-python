@@ -23,13 +23,16 @@ from smco.coco_runner import (  # noqa: E402
     write_run_provenance,
 )
 from smco.confirmatory import (  # noqa: E402
+    E4_BASELINES,
+    E4_DIMENSIONS,
+    confirmatory_coco_contract,
     confirmatory_run_matrix,
     enforce_confirmatory,
 )
 from smco.paper_contract import parse_algorithm_id  # noqa: E402
 
 _FAM_TOKEN = {"smco": "SMCO", "smco_refine": "SMCO-REFINE", "smco_boost_refine": "SMCO-BOOST-REFINE"}
-BASELINES = ("DE", "GA", "PSO", "SA", "GenSA")
+BASELINES = E4_BASELINES
 
 
 def _have_cocoex() -> bool:
@@ -143,11 +146,22 @@ def _resolve_winner_baselines(args, parser):
         enforce_confirmatory(manifest, selection=sel)
         matrix = confirmatory_run_matrix(
             manifest, expected_stage="e4_bbob_largescale", expected_suite="bbob-largescale")
-        if "baseline_algorithms" not in manifest:
-            parser.error("canonical E4 manifest must carry baseline_algorithms "
-                         "(no silent fallback to the default baseline set)")
         winner = manifest["winner_algorithm"]
-        baselines = list(manifest["baseline_algorithms"])
+        base = manifest["matched_base_algorithm"]
+        baselines = manifest.get("baseline_algorithms")
+        # R6c: the canonical E4 baseline set is the plan's 5 strong baselines — a
+        # subset (e.g. only DE) cannot run as canonical E4.
+        if list(baselines or []) != list(E4_BASELINES):
+            raise ValueError(
+                f"canonical E4 baselines must be the plan's {list(E4_BASELINES)}, "
+                f"got {baselines}")
+        # R6c: the manifest must be the full 7-config x 24-function x {160,320,640}
+        # x 5-instance E4 matrix (2520 tasks), not a partial grid.
+        confirmatory_coco_contract(
+            manifest,
+            expected_algos={winner, base} | set(E4_BASELINES),
+            expected_dims=E4_DIMENSIONS)
+        baselines = list(baselines)
         instances = list(range(1, matrix["n_instances"] + 1))
         print(f"[E4] canonical: matrix from manifest dims={matrix['dims']} "
               f"instances={instances} fe_budget_per_d={matrix['fe_budget_per_d']} "

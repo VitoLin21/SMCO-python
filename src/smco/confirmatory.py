@@ -30,6 +30,16 @@ from .experiment_manifests import (
 )
 from .paper_contract import NONE_TOKEN, parse_algorithm_id
 
+# COCO confirmatory matrix (plan E4/E5). E4 = winner + matched base + 5 strong
+# baselines over 24 bbob-largescale functions x {160,320,640} x 5 instances =
+# 7 x 24 x 3 x 5 = 2520 runs. E5 = winner + matched base over 24 bbob functions
+# x {5,20} x 5 instances = 2 x 24 x 2 x 5 = 480 runs.
+E4_BASELINES = ("DE", "GA", "PSO", "SA", "GenSA")
+E4_DIMENSIONS = (160, 320, 640)
+E5_DIMENSIONS = (5, 20)
+COCO_N_FUNCTIONS = 24
+COCO_N_INSTANCES = 5
+
 
 def is_run_complete(result_dir, run_id) -> bool:
     """A run is complete only on status=success; infra/timeout must retry."""
@@ -220,6 +230,53 @@ def confirmatory_run_matrix(manifest, *, expected_stage, expected_suite=None) ->
     }
 
 
+def confirmatory_coco_contract(
+    manifest, *, expected_algos, expected_dims,
+    n_instances: int = COCO_N_INSTANCES, n_functions: int = COCO_N_FUNCTIONS,
+) -> list:
+    """R6c: validate a COCO confirmatory manifest is the FULL plan matrix.
+
+    The manifest tasks must cover exactly ``expected_algos`` algorithms over
+    ``n_functions`` functions x ``expected_dims`` dimensions x ``n_instances``
+    instances — so a manifest with a baseline subset (e.g. only DE) or a partial
+    function/dim/instance grid cannot run as canonical E4/E5. Returns the
+    verified algorithm set (sorted).
+    """
+    tasks = manifest.get("tasks") or []
+    if not tasks:
+        raise ValueError("confirmatory manifest has no tasks")
+    algos = {t.get("algorithm_id") or t.get("algorithm") for t in tasks}
+    expected = set(expected_algos)
+    if algos != expected:
+        missing = sorted(expected - algos)
+        extra = sorted(algos - expected)
+        raise ValueError(
+            f"manifest algorithm set {sorted(algos)} != expected {sorted(expected)} "
+            f"(missing {missing}, extra {extra})")
+    dims = {int(t["dimension"]) for t in tasks}
+    expected_dim_set = {int(d) for d in expected_dims}
+    if dims != expected_dim_set:
+        raise ValueError(
+            f"manifest dims {sorted(dims)} != expected {sorted(expected_dim_set)}")
+    instances = {int(t["instance"]) for t in tasks}
+    if len(instances) != n_instances:
+        raise ValueError(
+            f"manifest has {len(instances)} instances, expected {n_instances} "
+            f"(matrix: {n_functions} functions x {sorted(expected_dim_set)} dims "
+            f"x {n_instances} instances)")
+    functions = {t.get("function") for t in tasks}
+    if len(functions) != n_functions:
+        raise ValueError(
+            f"manifest has {len(functions)} functions, expected {n_functions}")
+    expected_tasks = n_functions * len(expected_dim_set) * n_instances * len(expected)
+    if len(tasks) != expected_tasks:
+        raise ValueError(
+            f"manifest has {len(tasks)} tasks, expected "
+            f"{n_functions}x{len(expected_dim_set)}x{n_instances}x{len(expected)}="
+            f"{expected_tasks}")
+    return sorted(expected)
+
+
 __all__ = [
     "is_run_complete",
     "plan_batch",
@@ -227,4 +284,10 @@ __all__ = [
     "confirmatory_errors",
     "enforce_confirmatory",
     "confirmatory_run_matrix",
+    "confirmatory_coco_contract",
+    "E4_BASELINES",
+    "E4_DIMENSIONS",
+    "E5_DIMENSIONS",
+    "COCO_N_FUNCTIONS",
+    "COCO_N_INSTANCES",
 ]

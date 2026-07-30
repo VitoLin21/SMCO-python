@@ -248,3 +248,55 @@ def test_confirmatory_run_matrix_rejects_empty_tasks():
     with pytest.raises(ValueError, match="no tasks"):
         confirmatory_run_matrix(
             manifest, expected_stage="e4_bbob_largescale", expected_suite="bbob-largescale")
+
+
+# --- R6c: the E4 manifest must be the full 7-config x 24-function matrix ---
+
+def _coco_tasks(algos, functions, dims, n_instances, *, fe_budget_per_d=1000):
+    tasks = []
+    for fn in functions:
+        for d in dims:
+            for i in range(n_instances):
+                for a in algos:
+                    tasks.append({"algorithm_id": a, "function": fn, "dimension": d,
+                                  "instance": i, "fe_budget": fe_budget_per_d * d})
+    return tasks
+
+
+def test_confirmatory_coco_contract_passes_full_e4():
+    from smco.confirmatory import E4_BASELINES, E4_DIMENSIONS, confirmatory_coco_contract
+    from smco.experiment_manifests import build_manifest, freeze_manifest
+    algos = ["PY-SP-SMCO-EVO", "PY-BASE-SMCO"] + list(E4_BASELINES)
+    funcs = [f"f{i}" for i in range(1, 25)]
+    manifest = freeze_manifest(build_manifest(
+        "e4_bbob_largescale", "bbob-largescale",
+        _coco_tasks(algos, funcs, E4_DIMENSIONS, 5)))
+    assert confirmatory_coco_contract(
+        manifest, expected_algos=algos, expected_dims=E4_DIMENSIONS) == sorted(algos)
+
+
+def test_confirmatory_coco_contract_rejects_partial_algos():
+    from smco.confirmatory import E4_BASELINES, E4_DIMENSIONS, confirmatory_coco_contract
+    from smco.experiment_manifests import build_manifest, freeze_manifest
+    # only DE, not the full 5 baselines
+    algos = ["PY-SP-SMCO-EVO", "PY-BASE-SMCO", "DE"]
+    funcs = [f"f{i}" for i in range(1, 25)]
+    manifest = freeze_manifest(build_manifest(
+        "e4_bbob_largescale", "bbob-largescale",
+        _coco_tasks(algos, funcs, E4_DIMENSIONS, 5)))
+    expected = set(algos) | set(E4_BASELINES)
+    with pytest.raises(ValueError, match="algorithm set"):
+        confirmatory_coco_contract(
+            manifest, expected_algos=expected, expected_dims=E4_DIMENSIONS)
+
+
+def test_confirmatory_coco_contract_rejects_partial_functions():
+    from smco.confirmatory import E4_BASELINES, E4_DIMENSIONS, confirmatory_coco_contract
+    from smco.experiment_manifests import build_manifest, freeze_manifest
+    algos = ["PY-SP-SMCO-EVO", "PY-BASE-SMCO"] + list(E4_BASELINES)
+    manifest = freeze_manifest(build_manifest(
+        "e4_bbob_largescale", "bbob-largescale",
+        _coco_tasks(algos, ["f1"], E4_DIMENSIONS, 5)))  # 1 function, not 24
+    with pytest.raises(ValueError, match="functions"):
+        confirmatory_coco_contract(
+            manifest, expected_algos=algos, expected_dims=E4_DIMENSIONS)

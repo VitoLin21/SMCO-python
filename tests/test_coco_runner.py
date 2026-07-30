@@ -250,6 +250,24 @@ def _e4_manifest(tmp_path, *, stage="e4_bbob_largescale", suite="bbob-largescale
     (tmp_path / "selection.json").write_text(_json.dumps(sel))
 
 
+def _e4_full_manifest(tmp_path, *, baselines=("DE", "GA", "PSO", "SA", "GenSA"),
+                      functions=None, dims=(160, 320, 640), n_instances=5):
+    """A full E4 contract manifest (7 algos x 24 funcs x 3 dims x 5 instances)."""
+    import json as _json
+    from smco.confirmatory import build_confirmatory_manifest
+    if functions is None:
+        functions = [f"f{i}" for i in range(1, 25)]
+    sel = {"winner": "PY-SP-SMCO-EVO", "winner_language": "python",
+           "selection_hash": "s1", "winner_config_hash": "cfg"}
+    manifest = build_confirmatory_manifest(
+        sel, stage="e4_bbob_largescale", suite="bbob-largescale",
+        functions=list(functions), dims=list(dims), n_instances=n_instances,
+        fe_budget_per_d=1000, checkpoints_per_d=(1000,), baselines=baselines)
+    sel["winner_config_hash"] = manifest["winner_config_hash"]
+    (tmp_path / "manifest.json").write_text(_json.dumps(manifest))
+    (tmp_path / "selection.json").write_text(_json.dumps(sel))
+
+
 def test_e4_resolver_requires_selection_with_manifest(tmp_path):
     # R2b: --manifest without --selection must not be confirmatory.
     import argparse
@@ -263,10 +281,11 @@ def test_e4_resolver_requires_selection_with_manifest(tmp_path):
 
 
 def test_e4_resolver_reads_matrix_from_manifest_ignores_cli(tmp_path):
-    # R2b: dims/instances/budget/baselines come ONLY from the manifest; CLI overrides ignored.
+    # R2b/R6c: dims/instances/budget/baselines come ONLY from the manifest; the
+    # manifest must be the full E4 contract; CLI overrides are ignored.
     import argparse
     cli = _load_runner("e4_r2b_b", "scripts/run_smco_evo_bbob_largescale.py")
-    _e4_manifest(tmp_path, dims=(160, 320), n_instances=2, baselines=("DE", "GA"))
+    _e4_full_manifest(tmp_path)
     parser = argparse.ArgumentParser()
     args = argparse.Namespace(
         manifest=str(tmp_path / "manifest.json"),
@@ -275,10 +294,10 @@ def test_e4_resolver_reads_matrix_from_manifest_ignores_cli(tmp_path):
         suite="bbob-largescale", dims=[999], instances=[999], fe_budget_per_d=9999)
     resolved = cli._resolve_winner_baselines(args, parser)
     assert resolved["winner"] == "PY-SP-SMCO-EVO"
-    assert resolved["dims"] == [160, 320]          # manifest, not CLI 999
-    assert resolved["instances"] == [1, 2]          # n_instances=2 -> COCO ids 1,2
-    assert resolved["fe_budget_per_d"] == 1000      # manifest, not CLI 9999
-    assert resolved["baselines"] == ["DE", "GA"]    # manifest, not CLI SPURIOUS
+    assert resolved["dims"] == [160, 320, 640]      # manifest, not CLI 999
+    assert resolved["instances"] == [1, 2, 3, 4, 5]  # 5 instances -> COCO ids 1..5
+    assert resolved["fe_budget_per_d"] == 1000       # manifest, not CLI 9999
+    assert resolved["baselines"] == ["DE", "GA", "PSO", "SA", "GenSA"]  # manifest, not CLI
     assert resolved["suite"] == "bbob-largescale"
 
 
@@ -298,24 +317,35 @@ def test_e4_resolver_rejects_wrong_stage(tmp_path):
         cli._resolve_winner_baselines(args, parser)
 
 
-def test_e4_resolver_baselines_strict_from_manifest(tmp_path):
-    # R2b: a manifest missing baseline_algorithms is rejected (no silent fallback).
+def test_e4_resolver_rejects_partial_baselines(tmp_path):
+    # R6c reviewer repro: a manifest with only DE (not the plan's 5 baselines)
+    # must not run as canonical E4.
     import argparse
-    import json as _json
-    from smco.experiment_manifests import manifest_sha256
-    cli = _load_runner("e4_r2b_d", "scripts/run_smco_evo_bbob_largescale.py")
-    _e4_manifest(tmp_path, dims=(160,), n_instances=1, baselines=("DE",))
-    manifest = _json.loads((tmp_path / "manifest.json").read_text())
-    del manifest["baseline_algorithms"]
-    manifest["manifest_sha256"] = manifest_sha256(manifest)  # keep hash consistent
-    (tmp_path / "manifest.json").write_text(_json.dumps(manifest))
+    cli = _load_runner("e4_r6c_b", "scripts/run_smco_evo_bbob_largescale.py")
+    _e4_full_manifest(tmp_path, baselines=("DE",))
     parser = argparse.ArgumentParser()
     args = argparse.Namespace(
         manifest=str(tmp_path / "manifest.json"),
         selection=str(tmp_path / "selection.json"),
         winner=None, baselines=["DE"], development=False,
         suite="bbob-largescale", dims=[160], instances=[1], fe_budget_per_d=1000)
-    with pytest.raises(SystemExit):
+    with pytest.raises(ValueError, match="baseline"):
+        cli._resolve_winner_baselines(args, parser)
+
+
+def test_e4_resolver_rejects_partial_function_matrix(tmp_path):
+    # R6c: 7 algos + correct dims/instances but only 1 function -> not the 24-fn
+    # E4 matrix -> reject.
+    import argparse
+    cli = _load_runner("e4_r6c_c", "scripts/run_smco_evo_bbob_largescale.py")
+    _e4_full_manifest(tmp_path, functions=["f1"])
+    parser = argparse.ArgumentParser()
+    args = argparse.Namespace(
+        manifest=str(tmp_path / "manifest.json"),
+        selection=str(tmp_path / "selection.json"),
+        winner=None, baselines=["DE"], development=False,
+        suite="bbob-largescale", dims=[160], instances=[1], fe_budget_per_d=1000)
+    with pytest.raises(ValueError, match="functions"):
         cli._resolve_winner_baselines(args, parser)
 
 
