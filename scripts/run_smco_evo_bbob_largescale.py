@@ -59,6 +59,13 @@ def run_bbob_largescale(*, winner, suite, dims, instances, fe_budget_per_d,
     winner_py = to_py(winner)
     base = matched_base(winner_py)
     smco_algos = [winner_py, base]
+    # A-04: never silently swap an R winner for its Py equivalent on COCO.
+    original_language = parse_algorithm_id(winner)["language"]
+    language_note = None
+    if original_language != "python":
+        language_note = (f"{original_language} winner evaluated via the Py equivalent "
+                         f"{winner_py!r} on COCO (R cocoex unavailable)")
+        print(f"WARNING [E4]: {language_note}", file=sys.stderr)
     suite_obj = cocoex.Suite(
         suite,
         f"instances:{'-'.join(str(i) for i in instances)}",
@@ -86,7 +93,8 @@ def run_bbob_largescale(*, winner, suite, dims, instances, fe_budget_per_d,
     write_run_provenance(result_dir, kind="e4_bbob_largescale",
                          algorithms=smco_algos + list(baselines), winner=winner_py, base=base,
                          suite=suite, dims=dims, instances=instances,
-                         fe_budget_per_d=fe_budget_per_d)
+                         fe_budget_per_d=fe_budget_per_d, original_winner=winner,
+                         original_language=original_language, language_note=language_note)
     return {"n_runs": len(rows), "algorithms": smco_algos + list(baselines)}
 
 

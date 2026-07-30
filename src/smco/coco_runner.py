@@ -258,7 +258,8 @@ def aggregate_instance_summary(rows, algorithms):
 
 
 def write_run_provenance(result_dir, *, kind, algorithms, winner=None, base=None,
-                         suite=None, dims=None, instances=None, fe_budget_per_d=None):
+                         suite=None, dims=None, instances=None, fe_budget_per_d=None,
+                         original_winner=None, original_language=None, language_note=None):
     """Write ``provenance.json`` capturing the E4/E5 run conditions (A-09 #3).
 
     Records the git commit, Python/platform environment, frozen algorithm set
@@ -291,6 +292,12 @@ def write_run_provenance(result_dir, *, kind, algorithms, winner=None, base=None
         info["winner"] = winner
     if base is not None:
         info["matched_base"] = base
+    if original_winner is not None:
+        info["original_winner"] = original_winner
+    if original_language is not None:
+        info["original_language"] = original_language
+    if language_note is not None:
+        info["language_note"] = language_note
     out = Path(result_dir)
     out.mkdir(parents=True, exist_ok=True)
     (out / "provenance.json").write_text(_json.dumps(info, indent=2))

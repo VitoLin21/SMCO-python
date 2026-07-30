@@ -150,6 +150,7 @@ def test_build_selection_real_picks_global_winner(tmp_path):
         candidates=candidates, loader=loader,
     )
     assert summary["winner"] == "PY-SP-SMCO-EVO"
+    assert summary["winner_language"] == "python"  # A-04: record winner language
     assert (tmp_path / "selection_candidates.csv").exists()
     assert (tmp_path / "selection_score_components.csv").exists()
 

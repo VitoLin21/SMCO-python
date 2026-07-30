@@ -72,6 +72,7 @@ def test_lowdim_runner_small_subset(tmp_path):
     prov = json.loads((tmp_path / "provenance.json").read_text())
     assert prov["winner"] == "PY-SP-SMCO-EVO"
     assert prov["matched_base"] == "PY-BASE-SMCO"
+    assert prov["original_language"] == "python"
 
 
 def test_run_baseline_on_problem_smoke():
@@ -158,3 +159,21 @@ def test_aggregate_instance_summary_separates_dimensions():
     ]
     out, _ = aggregate_instance_summary(rows, ["A"])
     assert len(out) == 2  # d5 and d10 are distinct rows
+
+
+def test_lowdim_r_winner_records_language_note(tmp_path):
+    # A-04: an R winner is not silently swapped; provenance records the original
+    # language and a note that the Py equivalent was evaluated (R cocoex unavailable).
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        "lowdim_cli_r", Path("scripts/run_smco_evo_lowdim_check.py"))
+    cli = importlib.util.module_from_spec(spec); spec.loader.exec_module(cli)
+    cli.run_lowdim(winner="R-SP-SMCO-EVO", dims=[5], instances=[1],
+                   fe_budget_per_d=50, result_dir=tmp_path)
+    import json
+    prov = json.loads((tmp_path / "provenance.json").read_text())
+    assert prov["original_language"] == "r"
+    assert prov["original_winner"] == "R-SP-SMCO-EVO"
+    assert prov["winner"] == "PY-SP-SMCO-EVO"  # Py equivalent actually run
+    assert "R cocoex unavailable" in prov["language_note"]

@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Callable
 
 from .experiment_manifests import e1_algorithm_configs
+from .paper_contract import parse_algorithm_id
 
 TARGETS = ("1e-1", "1e-2", "1e-3", "1e-5")
 
@@ -301,10 +302,17 @@ def build_selection(
     }
     ranked = rank_configs(scored)
     winner = ranked[0][0] if ranked else None
+    winner_language = None
+    if winner is not None:
+        try:
+            winner_language = parse_algorithm_id(winner)["language"]
+        except Exception:
+            winner_language = None
     summary = {
         "dry_run": False,
         "n_candidates": len(candidates),
         "winner": winner,
+        "winner_language": winner_language,
         "rules": list(SELECTION_RULES),
     }
     _write_json(out_dir / "selection.json", summary)
