@@ -342,6 +342,17 @@ def test_e1_manifest_contract_rejects_unfrozen(tmp_path):
         _load_and_validate_e1_manifests([tmp_path / "m.json"])
 
 
+def test_e1_manifest_contract_rejects_wrong_suite(tmp_path):
+    # R7c-P2: E1 manifests must be suite synthetic_highdim.
+    import json as _json
+    from smco.experiment_manifests import build_manifest, freeze_manifest
+    from smco.selection import _load_and_validate_e1_manifests
+    m = freeze_manifest(build_manifest("e1_development", "bbob", [_e1_task("PY-SP-SMCO-EVO", "cfg", "r1")]))
+    (tmp_path / "m.json").write_text(_json.dumps(m))
+    with pytest.raises(ValueError, match="synthetic_highdim"):
+        _load_and_validate_e1_manifests([tmp_path / "m.json"])
+
+
 def test_e1_manifest_contract_rejects_incomplete_candidates(tmp_path):
     from smco.selection import _load_and_validate_e1_manifests
     p = _e1_manifest_file(tmp_path, "m.json", [_e1_task("PY-SP-SMCO-EVO", "cfg", "r1")])

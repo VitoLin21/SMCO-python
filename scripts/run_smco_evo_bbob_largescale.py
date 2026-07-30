@@ -145,7 +145,8 @@ def _resolve_winner_baselines(args, parser):
         sel = json.loads(Path(args.selection).read_text())
         enforce_confirmatory(manifest, selection=sel)
         matrix = confirmatory_run_matrix(
-            manifest, expected_stage="e4_bbob_largescale", expected_suite="bbob-largescale")
+            manifest, expected_stage="e4_bbob_largescale", expected_suite="bbob-largescale",
+            expected_fe_budget_per_d=1000)
         winner = manifest["winner_algorithm"]
         base = manifest["matched_base_algorithm"]
         baselines = manifest.get("baseline_algorithms")

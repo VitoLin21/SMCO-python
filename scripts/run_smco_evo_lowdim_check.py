@@ -23,6 +23,8 @@ from smco.coco_runner import (  # noqa: E402
     write_run_provenance,
 )
 from smco.confirmatory import (  # noqa: E402
+    E5_DIMENSIONS,
+    confirmatory_coco_contract,
     confirmatory_run_matrix,
     enforce_confirmatory,
 )
@@ -133,8 +135,14 @@ def _resolve_winner(args, parser):
         sel = json.loads(Path(args.selection).read_text())
         enforce_confirmatory(manifest, selection=sel)
         matrix = confirmatory_run_matrix(
-            manifest, expected_stage="e5_lowdim_check", expected_suite="bbob")
+            manifest, expected_stage="e5_lowdim_check", expected_suite="bbob",
+            expected_fe_budget_per_d=2000)
         winner = manifest["winner_algorithm"]
+        base = manifest["matched_base_algorithm"]
+        # R7c: the manifest must be the full winner+base x 24-function x {5,20} x
+        # 5-instance E5 matrix (480 tasks), not a partial grid.
+        confirmatory_coco_contract(
+            manifest, expected_algos={winner, base}, expected_dims=E5_DIMENSIONS)
         instances = list(range(1, matrix["n_instances"] + 1))
         print(f"[E5] canonical: matrix from manifest dims={matrix['dims']} "
               f"instances={instances} fe_budget_per_d={matrix['fe_budget_per_d']} "

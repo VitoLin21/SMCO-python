@@ -243,12 +243,14 @@ def _load_and_validate_e1_manifests(e1_manifest_paths) -> dict[str, dict[str, di
         (f, d, i) for f in E1_FUNCTIONS for d in E1_DIMENSIONS for i in range(E1_N_INSTANCES))
     index: dict[str, dict[str, dict]] = {}
     stages: set[str] = set()
+    suites: set[str] = set()
     for path in e1_manifest_paths:
         manifest = load_manifest(path)
         verify_manifest(manifest)  # raises if mutated after freeze
         if not manifest.get("frozen"):
             raise ValueError(f"E1 manifest {path} is not frozen")
         stages.add(manifest.get("stage"))
+        suites.add(manifest.get("suite"))
         for task in manifest.get("tasks", []):
             aid = task.get("algorithm_id")
             rid = task.get("run_id")
@@ -257,6 +259,9 @@ def _load_and_validate_e1_manifests(e1_manifest_paths) -> dict[str, dict[str, di
     if stages != {"e1_development"}:
         raise ValueError(
             f"E1 manifests must all be stage 'e1_development', got {sorted(stages)}")
+    if suites != {"synthetic_highdim"}:
+        raise ValueError(
+            f"E1 manifests must all be suite 'synthetic_highdim', got {sorted(suites)}")
     algos = set(index)
     if algos != expected_algos:
         missing = sorted(expected_algos - algos)

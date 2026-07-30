@@ -184,32 +184,27 @@ def test_lowdim_r_winner_records_language_note(tmp_path):
     assert "NOT the frozen" in prov["language_note"]
 
 
-def test_lowdim_main_manifest_mode_reads_winner(tmp_path):
-    # R-04: canonical E5 reads the winner from a frozen manifest (+ selection).
+def test_lowdim_resolver_canonical_reads_winner(tmp_path):
+    # R-04/R7c: canonical E5 reads the winner from a frozen FULL contract manifest
+    # (+ selection). (Resolver-level: the cocoex execution smoke is covered by
+    # test_lowdim_runner_small_subset; running the full 480-task matrix here would
+    # be too slow for a unit test.)
+    import argparse
     import importlib.util
-    import json as _json
     from pathlib import Path
-    from smco.confirmatory import build_confirmatory_manifest
     spec = importlib.util.spec_from_file_location(
         "lowdim_cli_m", Path("scripts/run_smco_evo_lowdim_check.py"))
     cli = importlib.util.module_from_spec(spec); spec.loader.exec_module(cli)
-    sel = {"winner": "PY-SP-SMCO-EVO", "winner_language": "python",
-           "selection_hash": "s1", "winner_config_hash": "cfg_x"}
-    manifest = build_confirmatory_manifest(
-        sel, stage="e5_lowdim_check", suite="bbob", functions=["Rastrigin"],
-        dims=[5], n_instances=1, fe_budget_per_d=50, checkpoints_per_d=(50,))
-    # use the real winner_config_hash the builder computed so the gate matches
-    sel["winner_config_hash"] = manifest["winner_config_hash"]
-    (tmp_path / "manifest.json").write_text(_json.dumps(manifest))
-    (tmp_path / "selection.json").write_text(_json.dumps(sel))
-    result_dir = tmp_path / "out"
-    rc = cli.main(["--manifest", str(tmp_path / "manifest.json"),
-                   "--selection", str(tmp_path / "selection.json"),
-                   "--dims", "5", "--instances", "1", "--fe-budget-per-d", "50",
-                   "--result-dir", str(result_dir)])
-    assert rc == 0
-    prov = _json.loads((result_dir / "provenance.json").read_text())
-    assert prov["winner"] == "PY-SP-SMCO-EVO"
+    _e5_full_manifest(tmp_path)
+    parser = argparse.ArgumentParser()
+    args = argparse.Namespace(
+        manifest=str(tmp_path / "manifest.json"),
+        selection=str(tmp_path / "selection.json"),
+        winner=None, development=False,
+        dims=[5], instances=[1], fe_budget_per_d=2000)
+    resolved = cli._resolve_winner(args, parser)
+    assert resolved["winner"] == "PY-SP-SMCO-EVO"
+    assert resolved["dims"] == [5, 20]
 
 
 def test_lowdim_main_free_winner_requires_development(tmp_path):
@@ -360,20 +355,29 @@ def test_e5_resolver_requires_selection_with_manifest(tmp_path):
         cli._resolve_winner(args, parser)
 
 
-def test_e5_resolver_reads_matrix_from_manifest_ignores_cli(tmp_path):
-    import argparse
-    cli = _load_runner("e5_r2b_b", "scripts/run_smco_evo_lowdim_check.py")
-    # build an actual E5 manifest (bbob, low dims)
+def _e5_full_manifest(tmp_path, *, functions=None, dims=(5, 20), n_instances=5,
+                      fe_budget_per_d=2000):
+    """A full E5 contract manifest (winner+base x 24 funcs x {5,20} x 5 instances)."""
     import json as _json
     from smco.confirmatory import build_confirmatory_manifest
+    if functions is None:
+        functions = [f"f{i}" for i in range(1, 25)]
     sel = {"winner": "PY-SP-SMCO-EVO", "winner_language": "python",
            "selection_hash": "s1", "winner_config_hash": "cfg"}
     manifest = build_confirmatory_manifest(
-        sel, stage="e5_lowdim_check", suite="bbob", functions=["Rastrigin"],
-        dims=[5], n_instances=1, fe_budget_per_d=2000, checkpoints_per_d=(2000,))
+        sel, stage="e5_lowdim_check", suite="bbob", functions=list(functions),
+        dims=list(dims), n_instances=n_instances,
+        fe_budget_per_d=fe_budget_per_d, checkpoints_per_d=(fe_budget_per_d,))
     sel["winner_config_hash"] = manifest["winner_config_hash"]
     (tmp_path / "manifest.json").write_text(_json.dumps(manifest))
     (tmp_path / "selection.json").write_text(_json.dumps(sel))
+
+
+def test_e5_resolver_reads_matrix_from_manifest_ignores_cli(tmp_path):
+    # R7c: E5 reads the full contract matrix from the manifest; CLI ignored.
+    import argparse
+    cli = _load_runner("e5_r7c_b", "scripts/run_smco_evo_lowdim_check.py")
+    _e5_full_manifest(tmp_path)
     parser = argparse.ArgumentParser()
     args = argparse.Namespace(
         manifest=str(tmp_path / "manifest.json"),
@@ -382,9 +386,25 @@ def test_e5_resolver_reads_matrix_from_manifest_ignores_cli(tmp_path):
         dims=[999], instances=[999], fe_budget_per_d=9999)
     resolved = cli._resolve_winner(args, parser)
     assert resolved["winner"] == "PY-SP-SMCO-EVO"
-    assert resolved["dims"] == [5]               # manifest, not CLI 999
-    assert resolved["instances"] == [1]           # n_instances=1 -> COCO id 1
-    assert resolved["fe_budget_per_d"] == 2000    # manifest, not CLI 9999
+    assert resolved["dims"] == [5, 20]            # manifest, not CLI 999
+    assert resolved["instances"] == [1, 2, 3, 4, 5]  # 5 instances -> COCO ids 1..5
+    assert resolved["fe_budget_per_d"] == 2000     # manifest, not CLI 9999
+
+
+def test_e5_resolver_rejects_partial_matrix(tmp_path):
+    # R7c reviewer repro: a single-function, d=5, single-instance E5 manifest
+    # must not be accepted as canonical E5.
+    import argparse
+    cli = _load_runner("e5_r7c_c", "scripts/run_smco_evo_lowdim_check.py")
+    _e5_full_manifest(tmp_path, functions=["f1"], dims=(5,), n_instances=1)
+    parser = argparse.ArgumentParser()
+    args = argparse.Namespace(
+        manifest=str(tmp_path / "manifest.json"),
+        selection=str(tmp_path / "selection.json"),
+        winner=None, development=False,
+        dims=[5], instances=[1], fe_budget_per_d=2000)
+    with pytest.raises(ValueError, match="functions|instances|dims"):
+        cli._resolve_winner(args, parser)
 
 
 def test_e5_resolver_rejects_wrong_stage(tmp_path):

@@ -183,16 +183,17 @@ def enforce_confirmatory(manifest: dict, *, selection: dict | None = None) -> bo
     return True
 
 
-def confirmatory_run_matrix(manifest, *, expected_stage, expected_suite=None) -> dict:
+def confirmatory_run_matrix(manifest, *, expected_stage, expected_suite=None,
+                            expected_fe_budget_per_d=None) -> dict:
     """R2b: derive the locked run matrix from a frozen confirmatory manifest's
-    tasks and verify its stage/suite match the calling runner.
+    tasks and verify its stage/suite/budget match the calling runner.
 
     A confirmatory runner (E4/E5) must read ``suite``, ``dims``, ``instances``,
     ``FE budget`` and the algorithm set ONLY from the manifest, so a frozen
     manifest of the wrong stage (e.g. an E2 manifest driving E4) or a CLI matrix
     override cannot change what actually runs. ``enforce_confirmatory`` must have
     already validated the frozen/hash/selection closure; this function enforces
-    stage/suite and extracts the matrix.
+    stage/suite (+ optional FE-budget-per-d) and extracts the matrix.
 
     Returns ``{suite, dims, n_instances, fe_budget_per_d}``; the runner maps
     ``n_instances`` to COCO instance ids ``1..n_instances``.
@@ -222,11 +223,17 @@ def confirmatory_run_matrix(manifest, *, expected_stage, expected_suite=None) ->
         raise ValueError(
             f"manifest mixes fe_budget_per_d within {expected_stage}: {sorted(per_d)}"
         )
+    budget_per_d = per_d.pop()
+    if expected_fe_budget_per_d is not None and budget_per_d != int(expected_fe_budget_per_d):
+        raise ValueError(
+            f"manifest fe_budget_per_d {budget_per_d} != expected "
+            f"{expected_fe_budget_per_d} for stage {expected_stage!r}"
+        )
     return {
         "suite": suite,
         "dims": dims,
         "n_instances": n_instances,
-        "fe_budget_per_d": per_d.pop(),
+        "fe_budget_per_d": budget_per_d,
     }
 
 

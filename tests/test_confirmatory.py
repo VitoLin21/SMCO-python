@@ -250,6 +250,16 @@ def test_confirmatory_run_matrix_rejects_empty_tasks():
             manifest, expected_stage="e4_bbob_largescale", expected_suite="bbob-largescale")
 
 
+def test_confirmatory_run_matrix_rejects_wrong_budget():
+    # R7c: the FE-budget-per-d is locked to the plan (E4 = 1000*d, E5 = 2000*d).
+    from smco.confirmatory import confirmatory_run_matrix
+    manifest = _build_e4_manifest()  # fe_budget_per_d = 1000
+    with pytest.raises(ValueError, match="fe_budget_per_d"):
+        confirmatory_run_matrix(
+            manifest, expected_stage="e4_bbob_largescale", expected_suite="bbob-largescale",
+            expected_fe_budget_per_d=999)
+
+
 # --- R6c: the E4 manifest must be the full 7-config x 24-function matrix ---
 
 def _coco_tasks(algos, functions, dims, n_instances, *, fe_budget_per_d=1000):
