@@ -5,17 +5,20 @@ from __future__ import annotations
 import pytest
 
 from smco.confirmatory import (
+    build_confirmatory_manifest,
     confirmatory_errors,
     enforce_confirmatory,
     is_run_complete,
     plan_batch,
 )
 from smco.experiment_manifests import (
+    build_algorithm_config,
     build_manifest,
     build_task,
     e1_algorithm_configs,
     expand_tasks,
     freeze_manifest,
+    manifest_sha256,
 )
 
 
@@ -83,3 +86,58 @@ def test_plan_batch_and_is_run_complete(tmp_path):
     assert is_run_complete(tmp_path, "r1") is True
     plan2 = plan_batch(tasks, tmp_path)
     assert plan2["completed"] == 1 and plan2["missing"] == 1
+
+
+# --- A-03: selection-driven confirmatory manifest + Gate-F closure ---
+
+def _selection(winner="PY-SP-SMCO-EVO", language="python", sel_hash="s1"):
+    return {"winner": winner, "winner_language": language, "selection_hash": sel_hash}
+
+
+def _build_e2(selection=None, baselines=()):
+    sel = selection or _selection()
+    return build_confirmatory_manifest(
+        sel, stage="e2_factorial_highdim", suite="synthetic_highdim",
+        functions=["Rastrigin"], dims=[200], n_instances=1,
+        fe_budget_per_d=1000, checkpoints_per_d=(1000,), baselines=baselines,
+    )
+
+
+def test_build_confirmatory_manifest_carries_closure_fields():
+    manifest = _build_e2()
+    assert manifest["frozen"] is True
+    assert manifest["selection_hash"] == "s1"
+    assert "winner_config_hash" in manifest
+    assert "matched_base_config_hash" in manifest
+    algos = {t["algorithm_id"] for t in manifest["tasks"]}
+    assert algos == {"PY-SP-SMCO-EVO", "PY-BASE-SMCO"}  # winner + matched base
+    assert set(manifest["allowed_algorithms"]) == algos
+    assert confirmatory_errors(manifest, selection=_selection()) == []
+
+
+def test_build_confirmatory_manifest_includes_baselines():
+    manifest = _build_e2(baselines=("DE", "CMA-ES"))
+    algos = {t.get("algorithm_id") or t.get("algorithm") for t in manifest["tasks"]}
+    assert {"PY-SP-SMCO-EVO", "PY-BASE-SMCO", "DE", "CMA-ES"} <= algos
+    assert set(manifest["allowed_algorithms"]) == algos
+
+
+def test_confirmatory_rejects_algorithm_outside_allowed():
+    manifest = _build_e2()
+    r_cfg = build_algorithm_config(
+        "r", "smco", True, "state_preserving", evolution_strategy="rand1bin",
+        evolution_points=(0.5, 0.75), elimination_rate=0.25, de_factor=0.8,
+        de_crossover=0.7, n_starts=8,
+    )
+    extra = build_task("e2_factorial_highdim", "synthetic_highdim", "Rastrigin",
+                       200, 0, 0, config=r_cfg, fe_budget=200000, checkpoints=(1000,), seed=1)
+    manifest["tasks"].append(extra)
+    manifest["manifest_sha256"] = manifest_sha256(manifest)  # keep hash consistent
+    errors = confirmatory_errors(manifest)
+    assert any("outside the allowed set" in e for e in errors)
+
+
+def test_confirmatory_rejects_wrong_selection_hash():
+    manifest = _build_e2(_selection(sel_hash="s1"))
+    errors = confirmatory_errors(manifest, selection=_selection(sel_hash="different"))
+    assert any("selection_hash mismatch" in e for e in errors)

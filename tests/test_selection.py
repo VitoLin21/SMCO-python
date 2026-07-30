@@ -155,6 +155,35 @@ def test_build_selection_real_picks_global_winner(tmp_path):
     assert (tmp_path / "selection_score_components.csv").exists()
 
 
+def test_build_selection_records_selection_and_config_hash(tmp_path):
+    # A-03 / A-02 part 2: selection emits selection_hash + winner_config_hash +
+    # per-candidate coverage + a result-set fingerprint.
+    runs = {
+        "PY-SP-SMCO-EVO": [_run({"1e-1": 10, "1e-2": 20}, 1e-3, 5.0)],
+        "PY-RS-SMCO-EVO": [_run({"1e-1": 12}, 1e-1, 4.0)],
+    }
+    runs["PY-SP-SMCO-EVO"][0]["run_id"] = "r1"
+    runs["PY-SP-SMCO-EVO"][0]["task"] = {"configuration_hash": "cfg_winner"}
+    runs["PY-RS-SMCO-EVO"][0]["run_id"] = "r2"
+    candidates = [
+        {"algorithm_id": "PY-SP-SMCO-EVO"},
+        {"algorithm_id": "PY-RS-SMCO-EVO"},
+    ]
+    loader = lambda result_dir, cands: runs
+    summary = build_selection(
+        result_dir=tmp_path, out_dir=tmp_path, dry_run=False,
+        candidates=candidates, loader=loader,
+    )
+    assert summary["winner_config_hash"] == "cfg_winner"
+    assert summary.get("selection_hash")
+    assert summary["coverage"] == {"PY-SP-SMCO-EVO": 1, "PY-RS-SMCO-EVO": 1}
+    assert summary["n_results"] == 2
+    assert summary["results_hash"]
+    import json as _json
+    loaded = _json.loads((tmp_path / "selection.json").read_text())
+    assert loaded["selection_hash"] == summary["selection_hash"]
+
+
 _ANALYZE = (
     Path(__file__).resolve().parent.parent / "scripts" / "analyze_smco_evo_highdim_paper.py"
 )

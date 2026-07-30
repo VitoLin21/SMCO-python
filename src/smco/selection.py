@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import csv
 import functools
+import hashlib
 import json
 import math
 import statistics
@@ -26,7 +27,7 @@ from pathlib import Path
 from typing import Callable
 
 from .experiment_manifests import e1_algorithm_configs
-from .paper_contract import parse_algorithm_id
+from .paper_contract import canonical_json, parse_algorithm_id
 
 TARGETS = ("1e-1", "1e-2", "1e-3", "1e-5")
 
@@ -271,6 +272,12 @@ def _write_report(path, summary, ranked, scored):
     path.write_text("\n".join(lines) + "\n")
 
 
+def _selection_hash(summary: dict) -> str:
+    """Stable hash of the selection summary (excludes the hash field itself)."""
+    payload = {k: v for k, v in summary.items() if k != "selection_hash"}
+    return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()[:16]
+
+
 def build_selection(
     result_dir,
     *,
@@ -308,13 +315,32 @@ def build_selection(
             winner_language = parse_algorithm_id(winner)["language"]
         except Exception:
             winner_language = None
+    winner_runs = runs_by_config.get(winner, []) if winner else []
+    winner_config_hash = None
+    if winner_runs:
+        wtask = winner_runs[0].get("task") or {}
+        winner_config_hash = wtask.get("configuration_hash")
+    # A-02 part 2: record per-candidate coverage + a fingerprint of the result
+    # set so a stale/incomplete directory cannot silently freeze a winner.
+    candidate_ids = [c["algorithm_id"] for c in candidates]
+    coverage = {aid: len(runs_by_config.get(aid, [])) for aid in candidate_ids}
+    all_run_ids = sorted({
+        r.get("run_id") for runs in runs_by_config.values() for r in runs if r.get("run_id")
+    })
+    results_hash = (hashlib.sha256(canonical_json(all_run_ids).encode("utf-8")).hexdigest()[:16]
+                    if all_run_ids else None)
     summary = {
         "dry_run": False,
         "n_candidates": len(candidates),
         "winner": winner,
         "winner_language": winner_language,
+        "winner_config_hash": winner_config_hash,
+        "coverage": coverage,
+        "n_results": len(all_run_ids),
+        "results_hash": results_hash,
         "rules": list(SELECTION_RULES),
     }
+    summary["selection_hash"] = _selection_hash(summary)
     _write_json(out_dir / "selection.json", summary)
     _write_candidates_csv(out_dir / "selection_candidates.csv", ranked)
     _write_score_components_csv(out_dir / "selection_score_components.csv", scored, ranked)
