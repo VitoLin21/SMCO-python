@@ -146,6 +146,37 @@ def _build_e2(selection=None, baselines=()):
     )
 
 
+def test_build_confirmatory_manifest_rejects_development_instances():
+    # A confirmatory (E2) manifest must link confirmatory-stage instances, never the
+    # development suite — dev/confirmatory transforms are disjoint (plan §6). This
+    # catches the pre-E2 bug where --instances-index pointed at the development index.
+    sel = _selection()
+    dev_index = {("Rastrigin", 200, 0): {
+        "function": "Rastrigin", "dimension": 200, "instance_id": 0,
+        "stage": "development",
+        "artifact_dir": "instances/development_Rastrigin_d200_i0",
+        "transform_sha256": "x", "start_points_hash": "y",
+    }}
+    with pytest.raises(ValueError, match="confirmatory-stage"):
+        build_confirmatory_manifest(
+            sel, stage="e2_factorial_highdim", suite="synthetic_highdim",
+            functions=["Rastrigin"], dims=[200], n_instances=1,
+            fe_budget_per_d=1000, checkpoints_per_d=(1000,),
+            instance_index=dev_index,
+        )
+    # confirmatory-stage index is accepted and its artifact dirs are used verbatim
+    conf_entry = dict(dev_index[("Rastrigin", 200, 0)], stage="confirmatory",
+                      artifact_dir="instances/confirmatory_Rastrigin_d200_i0")
+    manifest = build_confirmatory_manifest(
+        sel, stage="e2_factorial_highdim", suite="synthetic_highdim",
+        functions=["Rastrigin"], dims=[200], n_instances=1,
+        fe_budget_per_d=1000, checkpoints_per_d=(1000,),
+        instance_index={("Rastrigin", 200, 0): conf_entry},
+    )
+    assert manifest["frozen"] is True
+    assert all("confirmatory_" in t["instance_artifact_dir"] for t in manifest["tasks"])
+
+
 def test_build_confirmatory_manifest_carries_closure_fields():
     manifest = _build_e2()
     assert manifest["frozen"] is True

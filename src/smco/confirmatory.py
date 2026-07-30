@@ -86,6 +86,20 @@ def build_confirmatory_manifest(
     winner_config_hash, matched_base_config_hash and the allowed algorithm set so
     :func:`confirmatory_errors` can reject any task/result outside this closure.
     """
+    if instance_index:
+        # A confirmatory manifest (E2/E3/E6 synthetic) must link confirmatory-stage
+        # instances — never the development suite. dev/confirmatory transforms are
+        # disjoint by design (plan §6); silently reusing development instances would
+        # invalidate confirmatory inference. load_instance_index keys by
+        # (function, dim, iid) and carries each entry's ``stage``.
+        inst_stages = {e.get("stage") for e in instance_index.values() if e.get("stage")}
+        if "development" in inst_stages:
+            raise ValueError(
+                f"confirmatory manifest (stage {stage!r}) must link confirmatory-stage "
+                f"instances, but the instance index has development-stage entries; "
+                f"development and confirmatory suites must use disjoint instances "
+                f"(generate with --suite-stage confirmatory and link that index)"
+            )
     winner = selection["winner"]
     language = selection.get("winner_language") or "python"
     parsed = parse_algorithm_id(winner)
