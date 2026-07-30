@@ -222,3 +222,151 @@ def test_lowdim_main_free_winner_requires_development(tmp_path):
     with pytest.raises(SystemExit):
         cli.main(["--winner", "PY-SP-SMCO-EVO", "--dims", "5", "--instances", "1",
                   "--fe-budget-per-d", "50", "--result-dir", str(tmp_path / "out")])
+
+
+# --- R2b: canonical E4/E5 must lock stage + suite + matrix from the manifest ---
+
+def _load_runner(module_name, script):
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(module_name, Path(script))
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    return cli
+
+
+def _e4_manifest(tmp_path, *, stage="e4_bbob_largescale", suite="bbob-largescale",
+                 dims=(160, 320), n_instances=2, baselines=("DE", "GA")):
+    import json as _json
+    from smco.confirmatory import build_confirmatory_manifest
+    sel = {"winner": "PY-SP-SMCO-EVO", "winner_language": "python",
+           "selection_hash": "s1", "winner_config_hash": "cfg"}
+    manifest = build_confirmatory_manifest(
+        sel, stage=stage, suite=suite, functions=["Rastrigin"], dims=list(dims),
+        n_instances=n_instances, fe_budget_per_d=1000, checkpoints_per_d=(1000,),
+        baselines=baselines)
+    sel["winner_config_hash"] = manifest["winner_config_hash"]
+    (tmp_path / "manifest.json").write_text(_json.dumps(manifest))
+    (tmp_path / "selection.json").write_text(_json.dumps(sel))
+
+
+def test_e4_resolver_requires_selection_with_manifest(tmp_path):
+    # R2b: --manifest without --selection must not be confirmatory.
+    import argparse
+    cli = _load_runner("e4_r2b_a", "scripts/run_smco_evo_bbob_largescale.py")
+    _e4_manifest(tmp_path)
+    parser = argparse.ArgumentParser()
+    args = argparse.Namespace(manifest=str(tmp_path / "manifest.json"), selection=None,
+                              winner=None, baselines=["DE"], development=False)
+    with pytest.raises(SystemExit):
+        cli._resolve_winner_baselines(args, parser)
+
+
+def test_e4_resolver_reads_matrix_from_manifest_ignores_cli(tmp_path):
+    # R2b: dims/instances/budget/baselines come ONLY from the manifest; CLI overrides ignored.
+    import argparse
+    cli = _load_runner("e4_r2b_b", "scripts/run_smco_evo_bbob_largescale.py")
+    _e4_manifest(tmp_path, dims=(160, 320), n_instances=2, baselines=("DE", "GA"))
+    parser = argparse.ArgumentParser()
+    args = argparse.Namespace(
+        manifest=str(tmp_path / "manifest.json"),
+        selection=str(tmp_path / "selection.json"),
+        winner=None, baselines=["SPURIOUS"], development=False,
+        suite="bbob-largescale", dims=[999], instances=[999], fe_budget_per_d=9999)
+    resolved = cli._resolve_winner_baselines(args, parser)
+    assert resolved["winner"] == "PY-SP-SMCO-EVO"
+    assert resolved["dims"] == [160, 320]          # manifest, not CLI 999
+    assert resolved["instances"] == [1, 2]          # n_instances=2 -> COCO ids 1,2
+    assert resolved["fe_budget_per_d"] == 1000      # manifest, not CLI 9999
+    assert resolved["baselines"] == ["DE", "GA"]    # manifest, not CLI SPURIOUS
+    assert resolved["suite"] == "bbob-largescale"
+
+
+def test_e4_resolver_rejects_wrong_stage(tmp_path):
+    # R2b: a frozen E2 manifest must not drive the E4 runner.
+    import argparse
+    cli = _load_runner("e4_r2b_c", "scripts/run_smco_evo_bbob_largescale.py")
+    _e4_manifest(tmp_path, stage="e2_factorial_highdim", suite="synthetic_highdim",
+                 dims=(200,), n_instances=1, baselines=("DE",))
+    parser = argparse.ArgumentParser()
+    args = argparse.Namespace(
+        manifest=str(tmp_path / "manifest.json"),
+        selection=str(tmp_path / "selection.json"),
+        winner=None, baselines=["DE"], development=False,
+        suite="bbob-largescale", dims=[160], instances=[1], fe_budget_per_d=1000)
+    with pytest.raises(ValueError, match="stage"):
+        cli._resolve_winner_baselines(args, parser)
+
+
+def test_e4_resolver_baselines_strict_from_manifest(tmp_path):
+    # R2b: a manifest missing baseline_algorithms is rejected (no silent fallback).
+    import argparse
+    import json as _json
+    from smco.experiment_manifests import manifest_sha256
+    cli = _load_runner("e4_r2b_d", "scripts/run_smco_evo_bbob_largescale.py")
+    _e4_manifest(tmp_path, dims=(160,), n_instances=1, baselines=("DE",))
+    manifest = _json.loads((tmp_path / "manifest.json").read_text())
+    del manifest["baseline_algorithms"]
+    manifest["manifest_sha256"] = manifest_sha256(manifest)  # keep hash consistent
+    (tmp_path / "manifest.json").write_text(_json.dumps(manifest))
+    parser = argparse.ArgumentParser()
+    args = argparse.Namespace(
+        manifest=str(tmp_path / "manifest.json"),
+        selection=str(tmp_path / "selection.json"),
+        winner=None, baselines=["DE"], development=False,
+        suite="bbob-largescale", dims=[160], instances=[1], fe_budget_per_d=1000)
+    with pytest.raises(SystemExit):
+        cli._resolve_winner_baselines(args, parser)
+
+
+def test_e5_resolver_requires_selection_with_manifest(tmp_path):
+    import argparse
+    cli = _load_runner("e5_r2b_a", "scripts/run_smco_evo_lowdim_check.py")
+    _e4_manifest(tmp_path)  # reuse: builds a manifest + selection
+    parser = argparse.ArgumentParser()
+    args = argparse.Namespace(manifest=str(tmp_path / "manifest.json"), selection=None,
+                              winner=None, development=False)
+    with pytest.raises(SystemExit):
+        cli._resolve_winner(args, parser)
+
+
+def test_e5_resolver_reads_matrix_from_manifest_ignores_cli(tmp_path):
+    import argparse
+    cli = _load_runner("e5_r2b_b", "scripts/run_smco_evo_lowdim_check.py")
+    # build an actual E5 manifest (bbob, low dims)
+    import json as _json
+    from smco.confirmatory import build_confirmatory_manifest
+    sel = {"winner": "PY-SP-SMCO-EVO", "winner_language": "python",
+           "selection_hash": "s1", "winner_config_hash": "cfg"}
+    manifest = build_confirmatory_manifest(
+        sel, stage="e5_lowdim_check", suite="bbob", functions=["Rastrigin"],
+        dims=[5], n_instances=1, fe_budget_per_d=2000, checkpoints_per_d=(2000,))
+    sel["winner_config_hash"] = manifest["winner_config_hash"]
+    (tmp_path / "manifest.json").write_text(_json.dumps(manifest))
+    (tmp_path / "selection.json").write_text(_json.dumps(sel))
+    parser = argparse.ArgumentParser()
+    args = argparse.Namespace(
+        manifest=str(tmp_path / "manifest.json"),
+        selection=str(tmp_path / "selection.json"),
+        winner=None, development=False,
+        dims=[999], instances=[999], fe_budget_per_d=9999)
+    resolved = cli._resolve_winner(args, parser)
+    assert resolved["winner"] == "PY-SP-SMCO-EVO"
+    assert resolved["dims"] == [5]               # manifest, not CLI 999
+    assert resolved["instances"] == [1]           # n_instances=1 -> COCO id 1
+    assert resolved["fe_budget_per_d"] == 2000    # manifest, not CLI 9999
+
+
+def test_e5_resolver_rejects_wrong_stage(tmp_path):
+    import argparse
+    cli = _load_runner("e5_r2b_c", "scripts/run_smco_evo_lowdim_check.py")
+    _e4_manifest(tmp_path, stage="e4_bbob_largescale", suite="bbob-largescale",
+                 dims=(160,), n_instances=1, baselines=("DE",))
+    parser = argparse.ArgumentParser()
+    args = argparse.Namespace(
+        manifest=str(tmp_path / "manifest.json"),
+        selection=str(tmp_path / "selection.json"),
+        winner=None, development=False,
+        dims=[5], instances=[1], fe_budget_per_d=2000)
+    with pytest.raises(ValueError, match="stage"):
+        cli._resolve_winner(args, parser)

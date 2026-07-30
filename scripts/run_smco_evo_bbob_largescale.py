@@ -16,15 +16,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-import cocoex  # noqa: E402
-
 from smco.coco_runner import (  # noqa: E402
     aggregate_instance_summary,
     run_baseline_on_problem,
     run_on_problem,
     write_run_provenance,
 )
-from smco.confirmatory import enforce_confirmatory  # noqa: E402
+from smco.confirmatory import (  # noqa: E402
+    confirmatory_run_matrix,
+    enforce_confirmatory,
+)
 from smco.paper_contract import parse_algorithm_id  # noqa: E402
 
 _FAM_TOKEN = {"smco": "SMCO", "smco_refine": "SMCO-REFINE", "smco_boost_refine": "SMCO-BOOST-REFINE"}
@@ -56,6 +57,7 @@ def matched_base(winner_py: str) -> str:
 def run_bbob_largescale(*, winner, suite, dims, instances, fe_budget_per_d,
                         result_dir, baselines=BASELINES) -> dict:
     """Run winner + matched base + N baselines over the suite; write figure-5 CSVs."""
+    import cocoex  # local: keeps the resolver importable without cocoex (R2b tests)
     result_dir = Path(result_dir)
     result_dir.mkdir(parents=True, exist_ok=True)
     winner_py = to_py(winner)
@@ -127,25 +129,43 @@ def _write_summary(path, rows, algorithms):
 
 
 def _resolve_winner_baselines(args, parser):
-    """R-04: canonical E4 reads algorithms from a frozen manifest; free
-    --winner/--baselines is development-only and must be acknowledged."""
+    """R2b: canonical E4 requires --manifest AND --selection, locks the stage
+    (e4_bbob_largescale) + suite (bbob-largescale) and reads the full run matrix
+    (suite, dims, instances, FE budget, algorithms) ONLY from the manifest. Free
+    --winner/--baselines/--dims/... is development-only. Returns a resolved dict.
+    """
     if args.manifest:
+        if not args.selection:
+            parser.error("canonical E4 requires --manifest AND --selection; "
+                         "a manifest without its frozen selection is not confirmatory")
         manifest = json.loads(Path(args.manifest).read_text())
-        if args.selection:
-            sel = json.loads(Path(args.selection).read_text())
-            enforce_confirmatory(manifest, selection=sel)
+        sel = json.loads(Path(args.selection).read_text())
+        enforce_confirmatory(manifest, selection=sel)
+        matrix = confirmatory_run_matrix(
+            manifest, expected_stage="e4_bbob_largescale", expected_suite="bbob-largescale")
+        if "baseline_algorithms" not in manifest:
+            parser.error("canonical E4 manifest must carry baseline_algorithms "
+                         "(no silent fallback to the default baseline set)")
         winner = manifest["winner_algorithm"]
-        baselines = manifest.get("baseline_algorithms") or list(BASELINES)
-        return winner, baselines
+        baselines = list(manifest["baseline_algorithms"])
+        instances = list(range(1, matrix["n_instances"] + 1))
+        print(f"[E4] canonical: matrix from manifest dims={matrix['dims']} "
+              f"instances={instances} fe_budget_per_d={matrix['fe_budget_per_d']} "
+              f"(CLI --dims/--instances/--fe-budget-per-d ignored)", file=sys.stderr)
+        return {"winner": winner, "baselines": baselines, "suite": matrix["suite"],
+                "dims": matrix["dims"], "instances": instances,
+                "fe_budget_per_d": matrix["fe_budget_per_d"]}
     if not args.winner:
-        parser.error("canonical E4 requires --manifest (+ --selection); "
+        parser.error("canonical E4 requires --manifest + --selection; "
                      "or use --development with --winner")
     if not args.development:
         parser.error("free --winner/--baselines is development-only; pass "
                      "--development to acknowledge the output is not confirmatory")
     print("WARNING [E4]: development mode (free --winner/--baselines) — "
           "output is NOT confirmatory.", file=sys.stderr)
-    return args.winner, args.baselines
+    return {"winner": args.winner, "baselines": args.baselines, "suite": args.suite,
+            "dims": args.dims, "instances": args.instances,
+            "fe_budget_per_d": args.fe_budget_per_d}
 
 
 def main(argv=None) -> int:
@@ -166,10 +186,11 @@ def main(argv=None) -> int:
         print("ERROR: cocoex not installed. Install with: pip install coco-experiment", file=sys.stderr)
         return 2
 
-    winner, baselines = _resolve_winner_baselines(args, parser)
+    resolved = _resolve_winner_baselines(args, parser)
     summary = run_bbob_largescale(
-        winner=winner, suite=args.suite, dims=args.dims, instances=args.instances,
-        fe_budget_per_d=args.fe_budget_per_d, result_dir=args.result_dir, baselines=baselines)
+        winner=resolved["winner"], suite=resolved["suite"], dims=resolved["dims"],
+        instances=resolved["instances"], fe_budget_per_d=resolved["fe_budget_per_d"],
+        result_dir=args.result_dir, baselines=resolved["baselines"])
     print(f"E4 bbob-largescale: {summary['n_runs']} runs "
           f"({', '.join(summary['algorithms'])}) -> {args.result_dir}/bbob_largescale.csv")
     return 0

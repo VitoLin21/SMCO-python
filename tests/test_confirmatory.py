@@ -184,3 +184,67 @@ def test_confirmatory_rejects_wrong_selection_hash():
     manifest = _build_e2(_selection(sel_hash="s1"))
     errors = confirmatory_errors(manifest, selection=_selection(sel_hash="different"))
     assert any("selection_hash mismatch" in e for e in errors)
+
+
+# --- R2b: confirmatory manifest must lock stage + suite + run matrix ---
+
+def _build_e4_manifest(dims=(160, 320), n_instances=2, fe_budget_per_d=1000,
+                       baselines=("DE", "GA")):
+    sel = {"winner": "PY-SP-SMCO-EVO", "winner_language": "python",
+           "selection_hash": "s1", "winner_config_hash": "cfg"}
+    from smco.confirmatory import build_confirmatory_manifest
+    return build_confirmatory_manifest(
+        sel, stage="e4_bbob_largescale", suite="bbob-largescale",
+        functions=["Rastrigin"], dims=list(dims), n_instances=n_instances,
+        fe_budget_per_d=fe_budget_per_d, checkpoints_per_d=(1000,), baselines=baselines,
+    )
+
+
+def test_confirmatory_run_matrix_extracts_locked_matrix():
+    from smco.confirmatory import confirmatory_run_matrix
+    manifest = _build_e4_manifest(dims=(160, 320), n_instances=2, fe_budget_per_d=1000)
+    matrix = confirmatory_run_matrix(
+        manifest, expected_stage="e4_bbob_largescale", expected_suite="bbob-largescale")
+    assert matrix["suite"] == "bbob-largescale"
+    assert matrix["dims"] == [160, 320]
+    assert matrix["n_instances"] == 2
+    assert matrix["fe_budget_per_d"] == 1000
+
+
+def test_confirmatory_run_matrix_rejects_wrong_stage():
+    from smco.confirmatory import confirmatory_run_matrix
+    manifest = _build_e4_manifest()
+    # an E4 manifest must not drive an E5 runner (and vice versa)
+    with pytest.raises(ValueError, match="stage"):
+        confirmatory_run_matrix(manifest, expected_stage="e5_lowdim_check")
+
+
+def test_confirmatory_run_matrix_rejects_wrong_suite():
+    from smco.confirmatory import confirmatory_run_matrix
+    manifest = _build_e4_manifest()
+    with pytest.raises(ValueError, match="suite"):
+        confirmatory_run_matrix(
+            manifest, expected_stage="e4_bbob_largescale", expected_suite="bbob")
+
+
+def test_confirmatory_run_matrix_rejects_mixed_budget():
+    from smco.confirmatory import confirmatory_run_matrix
+    from smco.experiment_manifests import build_manifest, freeze_manifest, manifest_sha256
+    # two tasks with different fe_budget_per_d (1000 vs 2000) inside one stage
+    t1 = {"dimension": 160, "instance": 0, "fe_budget": 160000, "suite": "bbob-largescale"}
+    t2 = {"dimension": 320, "instance": 0, "fe_budget": 640000, "suite": "bbob-largescale"}
+    manifest = freeze_manifest(
+        build_manifest("e4_bbob_largescale", "bbob-largescale", [t1, t2]))
+    manifest["manifest_sha256"] = manifest_sha256(manifest)  # keep consistent
+    with pytest.raises(ValueError, match="mixes fe_budget_per_d"):
+        confirmatory_run_matrix(
+            manifest, expected_stage="e4_bbob_largescale", expected_suite="bbob-largescale")
+
+
+def test_confirmatory_run_matrix_rejects_empty_tasks():
+    from smco.confirmatory import confirmatory_run_matrix
+    from smco.experiment_manifests import build_manifest, freeze_manifest
+    manifest = freeze_manifest(build_manifest("e4_bbob_largescale", "bbob-largescale", []))
+    with pytest.raises(ValueError, match="no tasks"):
+        confirmatory_run_matrix(
+            manifest, expected_stage="e4_bbob_largescale", expected_suite="bbob-largescale")

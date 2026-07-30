@@ -17,14 +17,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-import cocoex  # noqa: E402
-
 from smco.coco_runner import (  # noqa: E402
     aggregate_instance_summary,
     run_on_problem,
     write_run_provenance,
 )
-from smco.confirmatory import enforce_confirmatory  # noqa: E402
+from smco.confirmatory import (  # noqa: E402
+    confirmatory_run_matrix,
+    enforce_confirmatory,
+)
 from smco.paper_contract import parse_algorithm_id  # noqa: E402
 
 _FAM_TOKEN = {"smco": "SMCO", "smco_refine": "SMCO-REFINE", "smco_boost_refine": "SMCO-BOOST-REFINE"}
@@ -55,6 +56,7 @@ def matched_base(winner_py: str) -> str:
 
 def run_lowdim(*, winner, dims, instances, fe_budget_per_d, result_dir) -> dict:
     """Run winner + matched base over the bbob suite; write supplement CSVs."""
+    import cocoex  # local: keeps the resolver importable without cocoex (R2b tests)
     result_dir = Path(result_dir)
     result_dir.mkdir(parents=True, exist_ok=True)
     winner_py = to_py(winner)
@@ -119,21 +121,34 @@ def _write_summary(path, rows, winner, base):
 
 
 def _resolve_winner(args, parser):
-    """R-04: canonical E5 reads the winner from a frozen manifest; free
-    --winner is development-only and must be acknowledged."""
+    """R2b: canonical E5 requires --manifest AND --selection, locks the stage
+    (e5_lowdim_check) + suite (bbob) and reads the run matrix ONLY from the
+    manifest. Free --winner/--dims/... is development-only. Returns a resolved dict.
+    """
     if args.manifest:
+        if not args.selection:
+            parser.error("canonical E5 requires --manifest AND --selection; "
+                         "a manifest without its frozen selection is not confirmatory")
         manifest = json.loads(Path(args.manifest).read_text())
-        if args.selection:
-            sel = json.loads(Path(args.selection).read_text())
-            enforce_confirmatory(manifest, selection=sel)
-        return manifest["winner_algorithm"]
+        sel = json.loads(Path(args.selection).read_text())
+        enforce_confirmatory(manifest, selection=sel)
+        matrix = confirmatory_run_matrix(
+            manifest, expected_stage="e5_lowdim_check", expected_suite="bbob")
+        winner = manifest["winner_algorithm"]
+        instances = list(range(1, matrix["n_instances"] + 1))
+        print(f"[E5] canonical: matrix from manifest dims={matrix['dims']} "
+              f"instances={instances} fe_budget_per_d={matrix['fe_budget_per_d']} "
+              f"(CLI --dims/--instances/--fe-budget-per-d ignored)", file=sys.stderr)
+        return {"winner": winner, "suite": matrix["suite"], "dims": matrix["dims"],
+                "instances": instances, "fe_budget_per_d": matrix["fe_budget_per_d"]}
     if not args.winner:
-        parser.error("canonical E5 requires --manifest (+ --selection); "
+        parser.error("canonical E5 requires --manifest + --selection; "
                      "or use --development with --winner")
     if not args.development:
         parser.error("free --winner is development-only; pass --development")
     print("WARNING [E5]: development mode — output is NOT confirmatory.", file=sys.stderr)
-    return args.winner
+    return {"winner": args.winner, "suite": "bbob", "dims": args.dims,
+            "instances": args.instances, "fe_budget_per_d": args.fe_budget_per_d}
 
 
 def main(argv=None) -> int:
@@ -152,10 +167,10 @@ def main(argv=None) -> int:
         print("ERROR: cocoex not installed. Install with: pip install coco-experiment", file=sys.stderr)
         return 2
 
-    winner = _resolve_winner(args, parser)
+    resolved = _resolve_winner(args, parser)
     summary = run_lowdim(
-        winner=winner, dims=args.dims, instances=args.instances,
-        fe_budget_per_d=args.fe_budget_per_d, result_dir=args.result_dir)
+        winner=resolved["winner"], dims=resolved["dims"], instances=resolved["instances"],
+        fe_budget_per_d=resolved["fe_budget_per_d"], result_dir=args.result_dir)
     print(f"E5 lowdim: {summary['n_runs']} runs ({summary['winner']} vs {summary['base']}) "
           f"-> {args.result_dir}/lowdim_degradation.csv")
     return 0

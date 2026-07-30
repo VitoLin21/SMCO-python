@@ -173,10 +173,58 @@ def enforce_confirmatory(manifest: dict, *, selection: dict | None = None) -> bo
     return True
 
 
+def confirmatory_run_matrix(manifest, *, expected_stage, expected_suite=None) -> dict:
+    """R2b: derive the locked run matrix from a frozen confirmatory manifest's
+    tasks and verify its stage/suite match the calling runner.
+
+    A confirmatory runner (E4/E5) must read ``suite``, ``dims``, ``instances``,
+    ``FE budget`` and the algorithm set ONLY from the manifest, so a frozen
+    manifest of the wrong stage (e.g. an E2 manifest driving E4) or a CLI matrix
+    override cannot change what actually runs. ``enforce_confirmatory`` must have
+    already validated the frozen/hash/selection closure; this function enforces
+    stage/suite and extracts the matrix.
+
+    Returns ``{suite, dims, n_instances, fe_budget_per_d}``; the runner maps
+    ``n_instances`` to COCO instance ids ``1..n_instances``.
+    """
+    stage = manifest.get("stage")
+    if stage != expected_stage:
+        raise ValueError(
+            f"manifest stage {stage!r} != expected {expected_stage!r}; "
+            f"a {expected_stage} runner cannot be driven by this manifest"
+        )
+    suite = manifest.get("suite")
+    if expected_suite is not None and suite != expected_suite:
+        raise ValueError(
+            f"manifest suite {suite!r} != expected {expected_suite!r} "
+            f"for stage {expected_stage!r}"
+        )
+    tasks = manifest.get("tasks") or []
+    if not tasks:
+        raise ValueError("confirmatory manifest has no tasks; cannot derive run matrix")
+    dims = sorted({int(t["dimension"]) for t in tasks})
+    n_instances = len({int(t["instance"]) for t in tasks})
+    per_d: set[int] = set()
+    for t in tasks:
+        d = int(t["dimension"]) or 1
+        per_d.add(int(t["fe_budget"]) // d)
+    if len(per_d) != 1:
+        raise ValueError(
+            f"manifest mixes fe_budget_per_d within {expected_stage}: {sorted(per_d)}"
+        )
+    return {
+        "suite": suite,
+        "dims": dims,
+        "n_instances": n_instances,
+        "fe_budget_per_d": per_d.pop(),
+    }
+
+
 __all__ = [
     "is_run_complete",
     "plan_batch",
     "build_confirmatory_manifest",
     "confirmatory_errors",
     "enforce_confirmatory",
+    "confirmatory_run_matrix",
 ]
