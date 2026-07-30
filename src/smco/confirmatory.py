@@ -275,6 +275,23 @@ def confirmatory_coco_contract(
     if len(functions) != n_functions:
         raise ValueError(
             f"manifest has {len(functions)} functions, expected {n_functions}")
+    # R8c: each (algorithm, function, dimension, instance) combination must appear
+    # exactly once. A manifest with the right set sizes and total count but a
+    # duplicated/missing combination (e.g. 2520 rows, 2519 unique) must not pass.
+    combos: set[tuple] = set()
+    duplicates: list[tuple] = []
+    for t in tasks:
+        key = (t.get("algorithm_id") or t.get("algorithm"), t.get("function"),
+               int(t["dimension"]), int(t["instance"]))
+        if key in combos:
+            duplicates.append(key)
+        else:
+            combos.add(key)
+    if duplicates:
+        raise ValueError(
+            f"manifest has {len(duplicates)} duplicate (algorithm,function,dimension,"
+            f"instance) task(s); each combination must appear exactly once "
+            f"(e.g. {duplicates[:3]})")
     expected_tasks = n_functions * len(expected_dim_set) * n_instances * len(expected)
     if len(tasks) != expected_tasks:
         raise ValueError(

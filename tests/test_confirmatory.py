@@ -310,3 +310,24 @@ def test_confirmatory_coco_contract_rejects_partial_functions():
     with pytest.raises(ValueError, match="functions"):
         confirmatory_coco_contract(
             manifest, expected_algos=algos, expected_dims=E4_DIMENSIONS)
+
+
+def test_confirmatory_coco_contract_rejects_duplicate_combo():
+    # R8c reviewer repro: 2520 rows but only 2519 unique (algorithm,function,dim,
+    # instance) combos (drop one, duplicate another) must not pass the validator.
+    import copy
+    from smco.confirmatory import E4_BASELINES, E4_DIMENSIONS, confirmatory_coco_contract
+    from smco.experiment_manifests import build_manifest, freeze_manifest, manifest_sha256
+    algos = ["PY-SP-SMCO-EVO", "PY-BASE-SMCO"] + list(E4_BASELINES)
+    funcs = [f"f{i}" for i in range(1, 25)]
+    tasks = _coco_tasks(algos, funcs, E4_DIMENSIONS, 5)
+    assert len(tasks) == 2520
+    # drop tasks[0] (its combo goes missing) and append a copy of tasks[1] (dup)
+    tasks = tasks[1:]
+    tasks.append(copy.deepcopy(tasks[0]))
+    assert len(tasks) == 2520  # total still matches, but one combo is duplicated
+    manifest = build_manifest("e4_bbob_largescale", "bbob-largescale", tasks)
+    manifest["manifest_sha256"] = manifest_sha256(manifest)  # keep hash consistent
+    with pytest.raises(ValueError, match="duplicate"):
+        confirmatory_coco_contract(
+            manifest, expected_algos=algos, expected_dims=E4_DIMENSIONS)
