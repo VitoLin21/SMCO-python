@@ -84,7 +84,7 @@ def run_bbob_largescale(*, winner, suite, dims, instances, fe_budget_per_d,
         print(f"WARNING [E4]: {language_note}", file=sys.stderr)
     suite_obj = cocoex.Suite(
         suite,
-        f"instances:{'-'.join(str(i) for i in instances)}",
+        f"instances:{','.join(str(i) for i in instances)}",
         f"dimensions:{','.join(str(d) for d in dims)}",
     )
 

@@ -81,7 +81,7 @@ def run_lowdim(*, winner, dims, instances, fe_budget_per_d, result_dir) -> dict:
         print(f"WARNING [E5]: {language_note}", file=sys.stderr)
     suite = cocoex.Suite(
         "bbob",
-        f"instances:{'-'.join(str(i) for i in instances)}",
+        f"instances:{','.join(str(i) for i in instances)}",
         f"dimensions:{','.join(str(d) for d in dims)}",
     )
 
