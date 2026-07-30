@@ -28,6 +28,7 @@ from smco.highdim_instances import (
     generate_instance,
     write_instance_artifacts,
 )
+from smco.confirmatory import build_confirmatory_manifest
 from smco.experiment_manifests import (
     build_manifest,
     e1_algorithm_configs,
@@ -280,6 +281,14 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--instances-index", default=None, help="Path to instances_index.json to link provenance.")
     parser.add_argument("--no-freeze", action="store_true", help="Write an unfrozen manifest.")
+    parser.add_argument(
+        "--selection", default=None,
+        help="selection.json: build a confirmatory manifest from the frozen winner + matched base (+ --baselines for E3).",
+    )
+    parser.add_argument(
+        "--baselines", nargs="+", default=[],
+        help="E3 comparison baselines (only with --selection).",
+    )
     args = parser.parse_args(argv)
 
     if args.stage == "instances":
@@ -311,6 +320,27 @@ def main(argv=None) -> int:
         instance_index = (
             load_instance_index(args.instances_index) if args.instances_index else None
         )
+        if args.selection:
+            # R-02: build a confirmatory manifest from the frozen selection
+            # (winner + matched base [+ baselines for E3]), not the generic
+            # 18-config E1 grid.
+            selection = json.loads(Path(args.selection).read_text())
+            manifest = build_confirmatory_manifest(
+                selection, stage=args.manifest_stage, suite=args.suite,
+                functions=args.functions, dims=args.dims, n_instances=args.n_instances,
+                fe_budget_per_d=args.fe_budget_per_d, checkpoints_per_d=args.checkpoints_per_d,
+                baselines=args.baselines, instance_index=instance_index,
+            )
+            if not args.dry_run:
+                out_dir = Path(args.out_dir)
+                out_dir.mkdir(parents=True, exist_ok=True)
+                write_manifest(manifest, out_dir / f"{manifest['manifest_id']}.json")
+            print(
+                f"[{'dry-run' if args.dry_run else 'wrote frozen'}] confirmatory manifest "
+                f"{manifest['manifest_id']} ({manifest['n_tasks']} tasks, "
+                f"winner={selection.get('winner')}) -> {args.out_dir}"
+            )
+            return 0
         manifest = build_manifest_for_suite(
             stage=args.manifest_stage,
             suite=args.suite,

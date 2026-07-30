@@ -48,16 +48,59 @@ def test_confirmatory_flags_tampered_hash():
 
 
 def test_confirmatory_selection_winner_must_be_in_manifest():
-    cfg = e1_algorithm_configs()[0]
-    task = build_task(
-        "e2_factorial_highdim", "synthetic_highdim", "Rastrigin", 200, 0, 0,
-        config=cfg, fe_budget=200000, checkpoints=(20000,), seed=1,
-    )
-    manifest = _frozen_manifest([task])
-    bad = confirmatory_errors(manifest, selection={"winner": "DOES-NOT-EXIST"})
+    cfg = build_algorithm_config("python", "smco", True, "state_preserving",
+        evolution_strategy="rand1bin", evolution_points=(0.5, 0.75),
+        elimination_rate=0.25, de_factor=0.8, de_crossover=0.7, n_starts=8)
+    sel = {"winner": cfg["algorithm_id"], "winner_language": "python",
+           "selection_hash": "s1", "winner_config_hash": cfg["configuration_hash"]}
+    manifest = build_confirmatory_manifest(
+        sel, stage="e2_factorial_highdim", suite="synthetic_highdim",
+        functions=["Rastrigin"], dims=[200], n_instances=1,
+        fe_budget_per_d=1000, checkpoints_per_d=(1000,))
+    bad = confirmatory_errors(manifest, selection={"winner": "DOES-NOT-EXIST",
+                                                    "selection_hash": "s1"})
     assert any("not present" in e for e in bad)
-    good = confirmatory_errors(manifest, selection={"winner": cfg["algorithm_id"]})
+    good = confirmatory_errors(manifest, selection=sel)
     assert good == []
+
+
+def test_confirmatory_requires_closure_hashes_when_selection_given():
+    # R-02: a plain frozen manifest (no closure hashes) must be rejected when a
+    # selection is supplied — not silently accepted.
+    manifest = _frozen_manifest()
+    errors = confirmatory_errors(manifest, selection={"winner": "PY-SP-SMCO-EVO",
+                                                       "selection_hash": "s1"})
+    assert any("missing selection_hash" in e for e in errors)
+    assert any("missing winner_config_hash" in e for e in errors)
+
+
+def test_generate_manifest_cli_is_selection_driven(tmp_path):
+    # R-02: the manifest CLI can build a confirmatory manifest from selection.json.
+    import importlib.util
+    import json as _json
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        "gen_cli", Path("scripts/generate_smco_evo_manifests.py"))
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    sel = {"winner": "PY-SP-SMCO-EVO", "winner_language": "python",
+           "selection_hash": "s1", "winner_config_hash": "cfg_x"}
+    sel_path = tmp_path / "selection.json"
+    sel_path.write_text(_json.dumps(sel))
+    out_dir = tmp_path / "out"
+    rc = cli.main(["--stage", "manifest", "--selection", str(sel_path),
+                   "--manifest-stage", "e2_factorial_highdim", "--suite", "synthetic_highdim",
+                   "--functions", "Rastrigin", "--dims", "200", "--n-instances", "1",
+                   "--fe-budget-per-d", "1000", "--checkpoints-per-d", "1000",
+                   "--out-dir", str(out_dir)])
+    assert rc == 0
+    manifests = list(out_dir.glob("*.json"))
+    assert len(manifests) == 1
+    manifest = _json.loads(manifests[0].read_text())
+    assert manifest["frozen"] is True
+    assert manifest["selection_hash"] == "s1"
+    assert "winner_config_hash" in manifest
+    assert "PY-SP-SMCO-EVO" in {t["algorithm_id"] for t in manifest["tasks"]}
 
 
 def test_confirmatory_selection_without_winner_flagged():

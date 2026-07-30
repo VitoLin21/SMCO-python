@@ -144,9 +144,21 @@ def confirmatory_errors(manifest: dict, *, selection: dict | None = None) -> lis
                 errors.append(
                     f"selection winner {winner!r} not present in manifest tasks"
                 )
+        # R-02: a confirmatory manifest driven by a selection MUST carry the
+        # selection closure hashes, and they must match — not merely be compared
+        # when the manifest happens to have them.
         sel_hash = selection.get("selection_hash")
-        if sel_hash and manifest.get("selection_hash") and sel_hash != manifest["selection_hash"]:
+        man_hash = manifest.get("selection_hash")
+        if man_hash is None:
+            errors.append("confirmatory manifest missing selection_hash")
+        elif sel_hash and sel_hash != man_hash:
             errors.append("selection_hash mismatch (manifest not built from this selection)")
+        sel_wch = selection.get("winner_config_hash")
+        man_wch = manifest.get("winner_config_hash")
+        if man_wch is None:
+            errors.append("confirmatory manifest missing winner_config_hash")
+        elif sel_wch and sel_wch != man_wch:
+            errors.append("winner_config_hash mismatch (manifest winner != selection winner)")
     return errors
 
 

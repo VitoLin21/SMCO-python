@@ -144,10 +144,15 @@ def _dispatch_baseline(task, instance_root, result_dir, log_dir, task_dir, wall_
 def run_baseline_batch(
     manifest_path, result_dir, instance_root, *, workers=1, resume=True,
     dry_run=False, wall_time_cap=None, only_dims=None, only_run_ids=None,
-    log_dir=None, confirmatory=False,
+    log_dir=None, confirmatory=False, selection=None,
 ) -> dict:
     if confirmatory:
-        enforce_confirmatory(load_manifest(manifest_path))  # baselines: no SMCO selection
+        manifest = load_manifest(manifest_path)
+        sel = None
+        if selection is not None:
+            sel = json.loads(Path(selection).read_text()) if isinstance(selection, str) else selection
+        # R-02.3: prove the E3 manifest came from the frozen selection.
+        enforce_confirmatory(manifest, selection=sel)
     tasks = load_baseline_manifest_tasks(
         manifest_path, only_dims=only_dims, only_run_ids=only_run_ids,
     )
@@ -199,6 +204,10 @@ def main(argv=None) -> int:
     parser.add_argument("--validate-only", action="store_true")
     parser.add_argument("--wall-time-cap", type=int, default=None)
     parser.add_argument("--confirmatory", action="store_true", help="Enforce frozen/hash before dispatch.")
+    parser.add_argument(
+        "--selection", default=None,
+        help="selection.json proving the E3 manifest came from the frozen winner (with --confirmatory).",
+    )
     args = parser.parse_args(argv)
 
     if args.manifest:
@@ -213,6 +222,7 @@ def main(argv=None) -> int:
             workers=args.workers, resume=args.resume, dry_run=args.dry_run,
             wall_time_cap=args.wall_time_cap, only_dims=args.only_dims,
             only_run_ids=args.only_run_ids, log_dir=args.log_dir, confirmatory=args.confirmatory,
+            selection=args.selection,
         )
         print(json.dumps(summary, indent=2))
         return 0
