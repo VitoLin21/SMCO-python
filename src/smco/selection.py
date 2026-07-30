@@ -26,7 +26,15 @@ import statistics
 from pathlib import Path
 from typing import Callable
 
-from .experiment_manifests import e1_algorithm_configs, load_manifest
+from .experiment_manifests import (
+    E1_DIMENSIONS,
+    E1_FUNCTIONS,
+    E1_N_INSTANCES,
+    E1_TASKS_PER_CANDIDATE,
+    e1_algorithm_configs,
+    load_manifest,
+    verify_manifest,
+)
 from .paper_contract import NONE_TOKEN, canonical_json, parse_algorithm_id
 
 TARGETS = ("1e-1", "1e-2", "1e-3", "1e-5")
@@ -221,16 +229,62 @@ def _merged_loader(merged_dir, candidates, *, expected_stage="e1_development"):
     return by_algo, dropped_other_stage
 
 
-def _load_e1_manifest_index(e1_manifest_paths) -> dict[str, dict[str, dict]]:
-    """{algorithm_id: {run_id: task}} from the frozen E1 manifests (R5b)."""
+def _load_and_validate_e1_manifests(e1_manifest_paths) -> dict[str, dict[str, dict]]:
+    """Load the frozen E1 manifests and validate the full E1 contract (R5c).
+
+    Each manifest must be frozen and stage ``e1_development``; together they must
+    cover all 18 E1 candidates, each with exactly 60 unique tasks over the SAME
+    60 (function, dimension, instance) problem set (plan E1: 4 funcs x 3 dims x
+    5 instances). Returns ``{algorithm_id: {run_id: task}}``. A wrong-stage or
+    incomplete manifest cannot freeze the E1 winner.
+    """
+    expected_algos = {c["algorithm_id"] for c in e1_algorithm_configs()}
+    expected_problems = frozenset(
+        (f, d, i) for f in E1_FUNCTIONS for d in E1_DIMENSIONS for i in range(E1_N_INSTANCES))
     index: dict[str, dict[str, dict]] = {}
+    stages: set[str] = set()
     for path in e1_manifest_paths:
         manifest = load_manifest(path)
+        verify_manifest(manifest)  # raises if mutated after freeze
+        if not manifest.get("frozen"):
+            raise ValueError(f"E1 manifest {path} is not frozen")
+        stages.add(manifest.get("stage"))
         for task in manifest.get("tasks", []):
             aid = task.get("algorithm_id")
             rid = task.get("run_id")
             if aid and rid:
                 index.setdefault(aid, {})[rid] = task
+    if stages != {"e1_development"}:
+        raise ValueError(
+            f"E1 manifests must all be stage 'e1_development', got {sorted(stages)}")
+    algos = set(index)
+    if algos != expected_algos:
+        missing = sorted(expected_algos - algos)
+        extra = sorted(algos - expected_algos)
+        raise ValueError(
+            f"E1 manifest candidates {sorted(algos)} != the 18 E1 candidates "
+            f"(missing {missing}, extra {extra})")
+    ref_problems: frozenset | None = None
+    for aid, tasks in index.items():
+        if len(tasks) != E1_TASKS_PER_CANDIDATE:
+            raise ValueError(
+                f"{aid}: expected {E1_TASKS_PER_CANDIDATE} E1 tasks, got {len(tasks)}")
+        problems = frozenset(
+            (t.get("function"), int(t["dimension"]), int(t["instance"]))
+            for t in tasks.values())
+        if len(problems) != E1_TASKS_PER_CANDIDATE:
+            raise ValueError(f"{aid}: duplicate (function,dim,instance) in E1 manifest")
+        if ref_problems is None:
+            ref_problems = problems
+        elif problems != ref_problems:
+            raise ValueError(f"{aid}: E1 problem set differs across candidates")
+    assert ref_problems is not None
+    if ref_problems != expected_problems:
+        missing = sorted(expected_problems - ref_problems)
+        extra = sorted(ref_problems - expected_problems)
+        raise ValueError(
+            f"E1 problem set != plan (4 funcs x 3 dims x 5 instances); "
+            f"missing {missing[:3]}... extra {extra[:3]}...")
     return index
 
 
@@ -451,7 +505,7 @@ def build_selection(
                 "manifests) to validate stage, run_ids and per-candidate task count; "
                 "pass development=True for raw result_dir exploration"
             )
-        e1_index = _load_e1_manifest_index(e1_manifest_paths)
+        e1_index = _load_and_validate_e1_manifests(e1_manifest_paths)
         runs_by_config, dropped_other_stage = _merged_loader(merged_dir, candidates)
         _enforce_e1_manifest_closure(runs_by_config, candidates, e1_index, dropped_other_stage)
         e1_manifest_validated = True

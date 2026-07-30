@@ -30,15 +30,13 @@ from smco.highdim_instances import (
 )
 from smco.confirmatory import build_confirmatory_manifest
 from smco.experiment_manifests import (
+    E1_FUNCTIONS,
     build_manifest,
     e1_algorithm_configs,
     expand_tasks,
     freeze_manifest,
     write_manifest,
 )
-
-# E1 development function set (Michalewicz replaced by Zakharov, 2026-07-29).
-E1_FUNCTIONS = ("Rastrigin", "Ackley", "Griewank", "Zakharov")
 
 
 def _starts_seed(function: str, dim: int, instance_id: int, stage: str, n_starts: int = 8) -> int:

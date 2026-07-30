@@ -45,6 +45,15 @@ DEFAULT_DE_CROSSOVER = 0.7
 DEFAULT_N_STARTS = 8
 DEFAULT_REFINE_RATIO = 0.5
 
+# E1 development contract (plan E1): 4 functions x 3 dims x 5 instances = 60
+# problem instances per candidate x 18 candidates = 1080 runs. Centralised so the
+# manifest generator and the selection validator agree on what "the E1 contract"
+# means (R5c).
+E1_FUNCTIONS = ("Rastrigin", "Ackley", "Griewank", "Zakharov")
+E1_DIMENSIONS = (200, 500, 1000)
+E1_N_INSTANCES = 5
+E1_TASKS_PER_CANDIDATE = len(E1_FUNCTIONS) * len(E1_DIMENSIONS) * E1_N_INSTANCES  # 60
+
 
 def build_algorithm_config(
     language: str,
@@ -526,6 +535,10 @@ __all__ = [
     "DEFAULT_N_STARTS",
     "build_algorithm_config",
     "e1_algorithm_configs",
+    "E1_FUNCTIONS",
+    "E1_DIMENSIONS",
+    "E1_N_INSTANCES",
+    "E1_TASKS_PER_CANDIDATE",
     "derive_seed",
     "build_task",
     "expand_tasks",

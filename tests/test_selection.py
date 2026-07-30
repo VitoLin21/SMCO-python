@@ -192,35 +192,41 @@ def test_build_selection_raw_requires_development(tmp_path):
 
 
 def test_build_selection_merged_canonical(tmp_path):
-    # R-05: canonical selection reads merged/ (audit + valid_runs.csv).
+    # R-05/R5c: canonical selection reads merged/ (audit + valid_runs.csv) and
+    # validates against the full frozen E1 contract. Outcomes are produced for a
+    # single candidate; selection is told to consider only that candidate.
     import json as _json
     from smco.merge_results import merge
     from smco.experiment_manifests import (
-        build_algorithm_config, build_manifest, build_task, freeze_manifest,
+        E1_DIMENSIONS, E1_FUNCTIONS, E1_N_INSTANCES,
+        build_manifest, e1_algorithm_configs, expand_tasks, freeze_manifest,
     )
-    cfg = build_algorithm_config("python", "smco", True, "state_preserving",
-        evolution_strategy="rand1bin", evolution_points=(0.5, 0.75),
-        elimination_rate=0.25, de_factor=0.8, de_crossover=0.7, n_starts=8)
-    task = build_task("e1_development", "synthetic_highdim", "Zakharov", 200, 0, 0,
-        config=cfg, fe_budget=200000, checkpoints=(50000,), seed=1,
-        instance_hash="ih", start_points_hash="sh")
-    manifest = freeze_manifest(build_manifest("e1_development", "synthetic_highdim", [task]))
+    tasks = expand_tasks("e1_development", "synthetic_highdim", list(E1_FUNCTIONS),
+                         list(E1_DIMENSIONS), E1_N_INSTANCES, e1_algorithm_configs(),
+                         fe_budget_per_d=1000, checkpoints_per_d=(1000,))
+    manifest = freeze_manifest(build_manifest("e1_development", "synthetic_highdim", tasks))
     (tmp_path / "m.json").write_text(_json.dumps(manifest))
-    raw = tmp_path / "raw"; raw.mkdir()
-    outcome = {"run_id": task["run_id"], "status": "success", "failure_reason": "none",
-        "fe_used": 199998, "fe_budget": 200000, "best_value": 1e-6, "known_optimum": 0.0,
-        "normalized_gap": 0.001, "target_hit_fe": {"1e-1": 100, "1e-2": 1000, "1e-3": None, "1e-5": None},
-        "anytime": [], "best_so_far_trace": [], "termination_reason": "evaluation_budget",
-        "fe_counts_by_event": {}, "wall_time_sec": 1.0, "peak_memory_mb": 1.0,
-        "machine_id": "h", "git_commit": "abc", "environment_hash": "env", "task": task,
-        "algorithm_id": task["algorithm_id"], "supersedes_run_id": "none"}
-    (raw / f"{task['run_id']}.json").write_text(_json.dumps(outcome))
+    aid = "PY-SP-SMCO-EVO"
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    for task in tasks:
+        if task["algorithm_id"] != aid:
+            continue
+        outcome = {"run_id": task["run_id"], "status": "success", "failure_reason": "none",
+            "fe_used": int(task["fe_budget"]) - 2, "fe_budget": task["fe_budget"],
+            "best_value": 1e-6, "known_optimum": 0.0, "normalized_gap": 0.001,
+            "target_hit_fe": {"1e-1": 100, "1e-2": 1000, "1e-3": None, "1e-5": None},
+            "anytime": [], "best_so_far_trace": [], "termination_reason": "evaluation_budget",
+            "fe_counts_by_event": {}, "wall_time_sec": 1.0, "peak_memory_mb": 1.0,
+            "machine_id": "h", "git_commit": "abc", "environment_hash": "env", "task": task,
+            "algorithm_id": aid, "supersedes_run_id": "none"}
+        (raw / f"{task['run_id']}.json").write_text(_json.dumps(outcome))
     merged = tmp_path / "merged"
     merge([tmp_path / "m.json"], [raw], merged)
     summary = build_selection(out_dir=tmp_path / "sel", merged_dir=merged,
                               e1_manifest_paths=[tmp_path / "m.json"],
-                              candidates=[{"algorithm_id": cfg["algorithm_id"]}])
-    assert summary["winner"] == cfg["algorithm_id"]
+                              candidates=[{"algorithm_id": aid}])
+    assert summary["winner"] == aid
 
 
 def test_enforce_merged_completeness_rejects_incomplete():
@@ -282,10 +288,97 @@ def _e1_row(aid, run_id, cfg_hash, *, stage="e1_development"):
             "target_hit_fe_1e-3": "", "target_hit_fe_1e-5": ""}
 
 
+def _full_e1_manifest(tmp_path, name="e1.json"):
+    """The full frozen 18x60 E1 contract manifest (plan E1)."""
+    import json as _json
+    from smco.experiment_manifests import (
+        E1_DIMENSIONS, E1_FUNCTIONS, E1_N_INSTANCES,
+        build_manifest, e1_algorithm_configs, expand_tasks, freeze_manifest,
+    )
+    tasks = expand_tasks("e1_development", "synthetic_highdim", list(E1_FUNCTIONS),
+                         list(E1_DIMENSIONS), E1_N_INSTANCES, e1_algorithm_configs(),
+                         fe_budget_per_d=1000, checkpoints_per_d=(1000,))
+    manifest = freeze_manifest(build_manifest("e1_development", "synthetic_highdim", tasks))
+    path = tmp_path / name
+    path.write_text(_json.dumps(manifest))
+    return path, manifest
+
+
+def _e1_rows_for(manifest, aid):
+    """One success merged row per manifest task of `aid` (configuration_hash carried)."""
+    rows = []
+    for t in manifest["tasks"]:
+        if t["algorithm_id"] != aid:
+            continue
+        rows.append({"algorithm_id": aid, "stage": "e1_development", "run_id": t["run_id"],
+                     "configuration_hash": t["configuration_hash"], "dimension": t["dimension"],
+                     "status": "success", "normalized_gap": 0.01, "wall_time_sec": 1.0,
+                     "fe_budget": t["fe_budget"], "target_hit_fe_1e-1": "100",
+                     "target_hit_fe_1e-2": "", "target_hit_fe_1e-3": "", "target_hit_fe_1e-5": ""})
+    return rows
+
+
+# --- R5c: the E1 manifest itself must be frozen, e1_development, and the full 18x60 contract ---
+
+def test_e1_manifest_contract_rejects_wrong_stage(tmp_path):
+    # Reviewer repro: a wrong-stage single-task manifest must not pass.
+    import json as _json
+    from smco.experiment_manifests import build_manifest, freeze_manifest
+    from smco.selection import _load_and_validate_e1_manifests
+    m = freeze_manifest(build_manifest(
+        "e2_factorial_highdim", "synthetic_highdim", [_e1_task("PY-SP-SMCO-EVO", "cfg", "r1")]))
+    (tmp_path / "m.json").write_text(_json.dumps(m))
+    with pytest.raises(ValueError, match="e1_development"):
+        _load_and_validate_e1_manifests([tmp_path / "m.json"])
+
+
+def test_e1_manifest_contract_rejects_unfrozen(tmp_path):
+    import json as _json
+    from smco.experiment_manifests import build_manifest
+    from smco.selection import _load_and_validate_e1_manifests
+    m = build_manifest("e1_development", "synthetic_highdim", [_e1_task("PY-SP-SMCO-EVO", "cfg", "r1")])
+    (tmp_path / "m.json").write_text(_json.dumps(m))
+    with pytest.raises(ValueError, match="not frozen"):
+        _load_and_validate_e1_manifests([tmp_path / "m.json"])
+
+
+def test_e1_manifest_contract_rejects_incomplete_candidates(tmp_path):
+    from smco.selection import _load_and_validate_e1_manifests
+    p = _e1_manifest_file(tmp_path, "m.json", [_e1_task("PY-SP-SMCO-EVO", "cfg", "r1")])
+    with pytest.raises(ValueError, match="18 E1 candidates"):
+        _load_and_validate_e1_manifests([p])
+
+
+def test_e1_manifest_contract_rejects_short_candidate(tmp_path):
+    import json as _json
+    from smco.experiment_manifests import manifest_sha256
+    from smco.selection import _load_and_validate_e1_manifests
+    p, manifest = _full_e1_manifest(tmp_path)
+    first_aid = manifest["tasks"][0]["algorithm_id"]
+    # drop the last task belonging to that candidate -> 59 tasks
+    last_idx = max(i for i, t in enumerate(manifest["tasks"]) if t["algorithm_id"] == first_aid)
+    del manifest["tasks"][last_idx]
+    manifest["manifest_sha256"] = manifest_sha256(manifest)
+    (tmp_path / "e1.json").write_text(_json.dumps(manifest))
+    with pytest.raises(ValueError, match="60 E1 tasks"):
+        _load_and_validate_e1_manifests([tmp_path / "e1.json"])
+
+
+def test_e1_manifest_contract_passes_full(tmp_path):
+    from smco.selection import _load_and_validate_e1_manifests
+    p, _ = _full_e1_manifest(tmp_path)
+    index = _load_and_validate_e1_manifests([p])
+    assert len(index) == 18
+    assert all(len(tasks) == 60 for tasks in index.values())
+
+
+# --- R5b (on the full contract): merged input must match the manifest exactly ---
+
 def test_build_selection_canonical_requires_e1_manifest(tmp_path):
-    # R5b: canonical selection over merged/ requires the E1 manifest to validate.
+    # canonical selection over merged/ requires the E1 manifest to validate.
     aid = "PY-SP-SMCO-EVO"
-    merged = _e1_merged_csv(tmp_path, [_e1_row(aid, "r1", "cfgA")])
+    mpath, manifest = _full_e1_manifest(tmp_path)
+    merged = _e1_merged_csv(tmp_path, _e1_rows_for(manifest, aid))
     with pytest.raises(ValueError, match="e1_manifest"):
         build_selection(out_dir=tmp_path / "sel", merged_dir=merged,
                         candidates=[{"algorithm_id": aid}])
@@ -293,8 +386,8 @@ def test_build_selection_canonical_requires_e1_manifest(tmp_path):
 
 def test_build_selection_canonical_with_manifest_validates_and_picks(tmp_path):
     aid = "PY-SP-SMCO-EVO"
-    mpath = _e1_manifest_file(tmp_path, "m.json", [_e1_task(aid, "cfgA", "r1")])
-    merged = _e1_merged_csv(tmp_path, [_e1_row(aid, "r1", "cfgA")])
+    mpath, manifest = _full_e1_manifest(tmp_path)
+    merged = _e1_merged_csv(tmp_path, _e1_rows_for(manifest, aid))
     summary = build_selection(out_dir=tmp_path / "sel", merged_dir=merged,
                               e1_manifest_paths=[mpath],
                               candidates=[{"algorithm_id": aid}])
@@ -303,12 +396,11 @@ def test_build_selection_canonical_with_manifest_validates_and_picks(tmp_path):
 
 
 def test_build_selection_rejects_mixed_stage_contamination(tmp_path):
-    # R5b: an e1 row + an equal-count e2 row for the same candidate must be
-    # rejected (the old "coverage equal" check would have passed this).
+    # an e1 row + an e2 row for the same candidate must be rejected.
     aid = "PY-SP-SMCO-EVO"
-    mpath = _e1_manifest_file(tmp_path, "m.json", [_e1_task(aid, "cfgA", "r1")])
-    rows = [_e1_row(aid, "r1", "cfgA"),
-            _e1_row(aid, "r2", "cfgA", stage="e2_factorial_highdim")]
+    mpath, manifest = _full_e1_manifest(tmp_path)
+    rows = _e1_rows_for(manifest, aid)
+    rows.append(_e1_row(aid, "stale-e2", "cfg", stage="e2_factorial_highdim"))
     merged = _e1_merged_csv(tmp_path, rows)
     with pytest.raises(ValueError, match="non-E1"):
         build_selection(out_dir=tmp_path / "sel", merged_dir=merged,
@@ -316,32 +408,36 @@ def test_build_selection_rejects_mixed_stage_contamination(tmp_path):
 
 
 def test_build_selection_rejects_wrong_task_count(tmp_path):
-    # R5b: manifest has 2 tasks but merged has 1 -> missing task -> reject
-    # (catches "each candidate equal count but not the planned N").
+    # merged missing one of the candidate's 60 tasks -> reject.
     aid = "PY-SP-SMCO-EVO"
-    mpath = _e1_manifest_file(
-        tmp_path, "m.json", [_e1_task(aid, "cfgA", "r1"), _e1_task(aid, "cfgA", "r2", instance=1)])
-    merged = _e1_merged_csv(tmp_path, [_e1_row(aid, "r1", "cfgA")])
+    mpath, manifest = _full_e1_manifest(tmp_path)
+    rows = _e1_rows_for(manifest, aid)
+    rows.pop()
+    merged = _e1_merged_csv(tmp_path, rows)
     with pytest.raises(ValueError, match="missing"):
         build_selection(out_dir=tmp_path / "sel", merged_dir=merged,
                         e1_manifest_paths=[mpath], candidates=[{"algorithm_id": aid}])
 
 
 def test_build_selection_rejects_rows_not_in_manifest(tmp_path):
-    # R5b: a merged row whose run_id is not in the E1 manifest -> extra -> reject.
+    # a merged row whose run_id is not in the E1 manifest -> extra -> reject.
     aid = "PY-SP-SMCO-EVO"
-    mpath = _e1_manifest_file(tmp_path, "m.json", [_e1_task(aid, "cfgA", "r1")])
-    merged = _e1_merged_csv(tmp_path, [_e1_row(aid, "r1", "cfgA"), _e1_row(aid, "rX", "cfgA")])
+    mpath, manifest = _full_e1_manifest(tmp_path)
+    rows = _e1_rows_for(manifest, aid)
+    rows.append(_e1_row(aid, "rX-not-in-manifest", "cfg"))
+    merged = _e1_merged_csv(tmp_path, rows)
     with pytest.raises(ValueError, match="not in the E1 manifest"):
         build_selection(out_dir=tmp_path / "sel", merged_dir=merged,
                         e1_manifest_paths=[mpath], candidates=[{"algorithm_id": aid}])
 
 
 def test_build_selection_rejects_configuration_hash_mismatch(tmp_path):
-    # R5b: a run_id present in the manifest but a different configuration_hash.
+    # a run_id present in the manifest but a different configuration_hash.
     aid = "PY-SP-SMCO-EVO"
-    mpath = _e1_manifest_file(tmp_path, "m.json", [_e1_task(aid, "cfgA", "r1")])
-    merged = _e1_merged_csv(tmp_path, [_e1_row(aid, "r1", "cfgDIFFERENT")])
+    mpath, manifest = _full_e1_manifest(tmp_path)
+    rows = _e1_rows_for(manifest, aid)
+    rows[0]["configuration_hash"] = "cfgDIFFERENT"
+    merged = _e1_merged_csv(tmp_path, rows)
     with pytest.raises(ValueError, match="configuration_hash mismatch"):
         build_selection(out_dir=tmp_path / "sel", merged_dir=merged,
                         e1_manifest_paths=[mpath], candidates=[{"algorithm_id": aid}])
