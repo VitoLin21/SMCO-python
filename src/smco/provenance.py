@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
+import re
 import socket
 import subprocess
 
@@ -41,4 +42,32 @@ def default_machine_id() -> str:
     return socket.gethostname()
 
 
-__all__ = ["default_git_commit", "default_environment_hash", "default_machine_id"]
+_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def require_confirmatory_provenance(machine_id, git_commit, environment_hash):
+    """Fail fast BEFORE dispatch: a confirmatory run must carry complete provenance
+    so the merge ``provenance_complete`` audit passes every row after a full run.
+    Raises ``SystemExit`` with guidance — do not waste a fleet run on rows the
+    audit will reject. ``git_commit`` must be a full 40-hex SHA (so the result
+    points at an exact commit, not a branch tip or empty default).
+    """
+    missing = [n for n, v in [("machine_id", machine_id),
+                              ("git_commit", git_commit),
+                              ("environment_hash", environment_hash)] if not v]
+    if missing:
+        raise SystemExit(
+            f"confirmatory run requires non-empty {missing}; pass "
+            f"--git-commit <40-hex-SHA> --environment-hash <h> --machine-id <h>"
+        )
+    if not _SHA_RE.match(git_commit or ""):
+        raise SystemExit(
+            f"confirmatory run requires a full 40-hex git_commit SHA, got "
+            f"{git_commit!r}; pass --git-commit $(git rev-parse HEAD)"
+        )
+
+
+__all__ = [
+    "default_git_commit", "default_environment_hash", "default_machine_id",
+    "require_confirmatory_provenance",
+]

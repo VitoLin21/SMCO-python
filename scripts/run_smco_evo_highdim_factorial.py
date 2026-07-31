@@ -36,6 +36,7 @@ from smco.highdim_instances import load_instance, load_starts, starts_filename
 from smco.highdim_worker import run_task
 from smco.experiment_manifests import load_manifest, verify_manifest
 from smco.confirmatory import enforce_confirmatory, is_run_complete, plan_batch
+from smco.provenance import require_confirmatory_provenance
 
 _THIS_SCRIPT = Path(__file__).resolve()
 _R_WORKER = _THIS_SCRIPT.parent / "run_smco_evo_highdim_r.R"
@@ -290,6 +291,9 @@ def run_batch(
     """
     if confirmatory:
         enforce_confirmatory(load_manifest(manifest_path), selection=selection)
+        # P1a+: fail fast — do not dispatch if provenance is incomplete (the
+        # merge provenance_complete audit would reject every row after a run).
+        require_confirmatory_provenance(machine_id, git_commit, environment_hash)
     tasks = load_manifest_tasks(
         manifest_path, only_language=only_language,
         only_dims=only_dims, only_run_ids=only_run_ids,

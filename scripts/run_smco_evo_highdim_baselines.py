@@ -31,7 +31,9 @@ from smco.baseline_worker import run_baseline_task
 from smco.confirmatory import enforce_confirmatory, is_run_complete, plan_batch
 from smco.experiment_manifests import baseline_run_id, load_manifest, verify_manifest
 from smco.highdim_instances import load_instance, load_starts
-from smco.provenance import default_environment_hash, default_git_commit
+from smco.provenance import (
+    default_environment_hash, default_git_commit, require_confirmatory_provenance,
+)
 
 _THIS_SCRIPT = Path(__file__).resolve()
 
@@ -162,6 +164,9 @@ def run_baseline_batch(
             sel = json.loads(Path(selection).read_text()) if isinstance(selection, str) else selection
         # R-02.3: prove the E3 manifest came from the frozen selection.
         enforce_confirmatory(manifest, selection=sel)
+        # P1a+: fail fast — do not dispatch if provenance is incomplete (the
+        # merge provenance_complete audit would reject every row after a run).
+        require_confirmatory_provenance(machine_id, git_commit, environment_hash)
     tasks = load_baseline_manifest_tasks(
         manifest_path, only_dims=only_dims, only_run_ids=only_run_ids,
     )

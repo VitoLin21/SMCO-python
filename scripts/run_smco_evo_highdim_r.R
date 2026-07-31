@@ -191,6 +191,10 @@ tryCatch({
   # P1b: prefer an explicit --git-commit from the batch dispatcher (rsync'd
   # worker trees are not git repos, so system2("git") returns "" and the merge
   # provenance_complete audit would fail).
+  # NOTE: the dispatcher also passes --machine-id/--environment-hash, but R
+  # records the actual host (Sys.info()[["nodename"]]) and R environment
+  # (R.version + jsonlite/qrng versions) rather than consuming those flags —
+  # so R provenance is self-reported; only --git-commit is dispatcher-driven.
   .git <- flag_value("git-commit", .args)
   if (is.null(.git) || !nzchar(.git)) {
     .git <- tryCatch({
