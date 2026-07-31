@@ -246,6 +246,15 @@ def test_identity_key_distinguishes_n_starts():
     assert _identity_key(a) != _identity_key(b)
 
 
+def test_identity_key_distinguishes_configuration_hash():
+    # P0: E6.2/E6.3 ablation — same algorithm_id/strategy/seed/n_starts but a
+    # different configuration_hash (evolution_points/elimination_rate varied)
+    # must NOT be flagged as a pseudo-duplicate.
+    a = _row("r1")
+    b = _row("r2", configuration_hash="cfg2")
+    assert _identity_key(a) != _identity_key(b)
+
+
 def test_merge_orphan_outcome_flagged_in_coverage_audit(tmp_path):
     """A-08 #2: an outcome whose run_id is in NO manifest must be surfaced to
     the manifest_coverage audit, not silently dropped."""

@@ -162,11 +162,15 @@ def _identity_key(row: dict) -> tuple:
 
     n_starts is included so the E6.1 start-count tiers (same algorithm_id/seed,
     different n_starts) are distinct, not flagged as pseudo-duplicates.
+    configuration_hash is included so E6.2/E6.3 ablation configs (same
+    algorithm_id/strategy/seed but different evolution_points/elimination_rate)
+    are distinct, not flagged as pseudo-duplicates.
     """
     return (
         row["function"], int(row["dimension"]), int(row["instance"]),
         row["algorithm_id"], row["language"], row["state_semantics"],
         row["evolution_strategy"], int(row["seed"]), int(row["n_starts"]),
+        row.get("configuration_hash", ""),
     )
 
 
