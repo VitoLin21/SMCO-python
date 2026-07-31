@@ -31,6 +31,7 @@ from smco.baseline_worker import run_baseline_task
 from smco.confirmatory import enforce_confirmatory, is_run_complete, plan_batch
 from smco.experiment_manifests import baseline_run_id, load_manifest, verify_manifest
 from smco.highdim_instances import load_instance, load_starts
+from smco.provenance import default_environment_hash, default_git_commit
 
 _THIS_SCRIPT = Path(__file__).resolve()
 
@@ -112,7 +113,8 @@ def load_baseline_manifest_tasks(manifest_path, *, only_dims=None, only_run_ids=
     return tasks
 
 
-def _dispatch_baseline(task, instance_root, result_dir, log_dir, task_dir, wall_time_cap):
+def _dispatch_baseline(task, instance_root, result_dir, log_dir, task_dir, wall_time_cap,
+                       machine_id="", git_commit="", environment_hash=""):
     run_id = task["run_id"]
     task_json = Path(task_dir) / f"{run_id}.task.json"
     task_json.write_text(json.dumps(task))
@@ -121,6 +123,12 @@ def _dispatch_baseline(task, instance_root, result_dir, log_dir, task_dir, wall_
         "--instance-root", str(instance_root), "--result-dir", str(result_dir),
         "--log-dir", str(log_dir),
     ]
+    if machine_id:
+        cmd += ["--machine-id", str(machine_id)]
+    if git_commit:
+        cmd += ["--git-commit", str(git_commit)]
+    if environment_hash:
+        cmd += ["--environment-hash", str(environment_hash)]
     try:
         proc = subprocess.run(cmd, timeout=wall_time_cap, capture_output=True, text=True)
         status = "success" if proc.returncode == 0 else "worker_nonzero"
@@ -145,6 +153,7 @@ def run_baseline_batch(
     manifest_path, result_dir, instance_root, *, workers=1, resume=True,
     dry_run=False, wall_time_cap=None, only_dims=None, only_run_ids=None,
     log_dir=None, confirmatory=False, selection=None,
+    machine_id="", git_commit="", environment_hash="",
 ) -> dict:
     if confirmatory:
         manifest = load_manifest(manifest_path)
@@ -176,7 +185,7 @@ def run_baseline_batch(
             futures = {
                 executor.submit(
                     _dispatch_baseline, t, str(instance_root), str(result_dir),
-                    str(log_dir), task_dir, wall_time_cap,
+                    str(log_dir), task_dir, wall_time_cap, machine_id, git_commit, environment_hash,
                 ): t
                 for t in todos
             }
@@ -208,6 +217,15 @@ def main(argv=None) -> int:
         "--selection", default=None,
         help="selection.json proving the E3 manifest came from the frozen winner (with --confirmatory).",
     )
+    parser.add_argument("--machine-id", default=None, help="Defaults to hostname.")
+    parser.add_argument(
+        "--git-commit", default=None,
+        help="Defaults to current git HEAD (P1a: merge provenance_complete audit requires non-empty).",
+    )
+    parser.add_argument(
+        "--environment-hash", default=None,
+        help="Defaults to a python/numpy/platform hash (P1a provenance).",
+    )
     args = parser.parse_args(argv)
 
     if args.manifest:
@@ -223,6 +241,12 @@ def main(argv=None) -> int:
             wall_time_cap=args.wall_time_cap, only_dims=args.only_dims,
             only_run_ids=args.only_run_ids, log_dir=args.log_dir, confirmatory=args.confirmatory,
             selection=args.selection,
+            machine_id=args.machine_id if args.machine_id is not None else socket.gethostname(),
+            git_commit=args.git_commit if args.git_commit is not None else default_git_commit(),
+            environment_hash=(
+                args.environment_hash if args.environment_hash is not None
+                else default_environment_hash()
+            ),
         )
         print(json.dumps(summary, indent=2))
         return 0
@@ -231,7 +255,12 @@ def main(argv=None) -> int:
         return run_baseline_file(
             args.task, instance_root=args.instance_root,
             result_dir=args.result_dir, log_dir=args.log_dir,
-            machine_id=socket.gethostname(),
+            machine_id=args.machine_id if args.machine_id is not None else socket.gethostname(),
+            git_commit=args.git_commit if args.git_commit is not None else default_git_commit(),
+            environment_hash=(
+                args.environment_hash if args.environment_hash is not None
+                else default_environment_hash()
+            ),
         )
 
     parser.error("either --task (worker) or --manifest (batch) is required")

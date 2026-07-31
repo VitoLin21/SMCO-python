@@ -193,6 +193,19 @@ def test_audit_flags_duplicate_identity():
     assert any("duplicate" in c["name"] for c in audit["checks"])
 
 
+def test_audit_flags_missing_provenance():
+    # P1a: a row missing git_commit/environment_hash/machine_id must fail the
+    # provenance_complete audit — the result is not auditable (cannot stand as
+    # formal evidence). Applies to E1 winner freezing + E2-E6 confirmatory.
+    task = _evo_task()
+    row = smco_row_from_outcome(_smco_outcome(task), task)
+    row["git_commit"] = ""  # missing
+    audit = audit_payloads([row], {task["run_id"]: task})
+    assert audit["passed"] is False
+    prov = next(c for c in audit["checks"] if c["name"] == "provenance_complete")
+    assert prov["passed"] is False
+
+
 def _write(raw_dir, run_id, payload):
     (raw_dir / f"{run_id}.json").write_text(json.dumps(payload))
 
@@ -211,7 +224,7 @@ def test_merge_end_to_end_writes_all_artefacts(tmp_path):
         "normalized_gap": 0.4, "target_hit_fe": {"1e-1": 100, "1e-2": None, "1e-3": None, "1e-5": None},
         "anytime": [], "best_so_far_trace": [], "termination_reason": "evaluation_budget",
         "fe_counts_by_event": {}, "wall_time_sec": 1.0, "peak_memory_mb": None,
-        "machine_id": "h", "git_commit": "", "environment_hash": "env", "task": btask,
+        "machine_id": "h", "git_commit": "abc", "environment_hash": "env", "task": btask,
         "algorithm_id": "DE", "supersedes_run_id": "none"}
     _write(raw, btask["run_id"], boc)
 

@@ -277,6 +277,18 @@ def audit_payloads(rows: list[dict], task_index: dict[str, dict]) -> dict:
     checks.append(_check("status_vocabulary", rows, not bad_status,
                          [f"unknown status: {b}" for b in bad_status]))
 
+    # 12. P1a: provenance complete — every row must carry a non-empty
+    # git_commit, environment_hash and machine_id so the result is auditable
+    # (reproducible source). Applies to ALL merged input (E1 winner freezing +
+    # E2-E6 confirmatory); a missing field means the result cannot stand as
+    # formal evidence.
+    missing_prov = [r["run_id"] for r in rows
+                    if not r.get("git_commit") or not r.get("environment_hash")
+                    or not r.get("machine_id")]
+    checks.append(_check("provenance_complete", rows, not missing_prov,
+                         [f"missing provenance (git_commit/environment_hash/machine_id): {m}"
+                          for m in missing_prov]))
+
     failed = [c["name"] for c in checks if not c["passed"]]
     return {
         "passed": not failed,

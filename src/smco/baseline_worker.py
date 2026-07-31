@@ -33,6 +33,7 @@ from comparison.methods.sa import simulated_annealing
 from .evaluation import EvaluationBudgetExceeded
 from .highdim_instances import HighDimInstance
 from .paper_contract import NONE_TOKEN
+from .provenance import default_environment_hash, default_git_commit, default_machine_id
 
 _BASELINE_DISPATCH = {
     "DE": differential_evo,
@@ -105,6 +106,13 @@ def run_baseline_task(
     environment_hash: str = "",
 ) -> dict:
     """Run one baseline under the SMCO FE budget and return the result payload."""
+    # P1a: default provenance so every baseline outcome is auditable (the merge
+    # provenance_complete audit requires non-empty git/env/machine). Applies even
+    # when called directly as a task entry point (run_baseline_file), not only
+    # via the batch dispatcher.
+    machine_id = machine_id or default_machine_id()
+    git_commit = git_commit or default_git_commit()
+    environment_hash = environment_hash or default_environment_hash()
     if not isinstance(instance, HighDimInstance):
         raise TypeError("instance must be a HighDimInstance")
     if algorithm_name not in _BASELINE_DISPATCH:
