@@ -188,11 +188,17 @@ tryCatch({
 
   # A-09 #2: capture git commit + a richer environment hash (R version + key
   # package versions) so R results are reproducible/auditable like Python's.
-  .git <- tryCatch({
-    out <- suppressWarnings(system2("git", c("rev-parse", "HEAD"),
-                                    stdout = TRUE, stderr = FALSE))
-    if (length(out) && nzchar(out[1])) out[1] else ""
-  }, error = function(e) "")
+  # P1b: prefer an explicit --git-commit from the batch dispatcher (rsync'd
+  # worker trees are not git repos, so system2("git") returns "" and the merge
+  # provenance_complete audit would fail).
+  .git <- flag_value("git-commit", .args)
+  if (is.null(.git) || !nzchar(.git)) {
+    .git <- tryCatch({
+      out <- suppressWarnings(system2("git", c("rev-parse", "HEAD"),
+                                      stdout = TRUE, stderr = FALSE))
+      if (length(out) && nzchar(out[1])) out[1] else ""
+    }, error = function(e) "")
+  }
   .qrng_v <- tryCatch(as.character(packageVersion("qrng")), error = function(e) "NA")
   .env_hash <- paste0("R-", R.version$major, ".", R.version$minor,
                       "|jsonlite=", as.character(packageVersion("jsonlite")),

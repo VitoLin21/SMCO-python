@@ -212,23 +212,35 @@ def load_manifest_tasks(
     return tasks
 
 
-def _worker_command(task, task_json, instance_root, result_dir, log_dir) -> list[str]:
+def _worker_command(task, task_json, instance_root, result_dir, log_dir,
+                    machine_id="", git_commit="", environment_hash="") -> list[str]:
     common = [
         "--task", str(task_json),
         "--instance-root", str(instance_root),
         "--result-dir", str(result_dir),
         "--log-dir", str(log_dir),
     ]
+    # P1b: propagate provenance so workers (which may run on rsync'd, non-git
+    # trees) emit non-empty git_commit/environment_hash/machine_id — the merge
+    # provenance_complete audit requires all three.
+    if machine_id:
+        common += ["--machine-id", str(machine_id)]
+    if environment_hash:
+        common += ["--environment-hash", str(environment_hash)]
+    if git_commit:
+        common += ["--git-commit", str(git_commit)]
     if task.get("language") == "python":
         return [sys.executable, str(_THIS_SCRIPT)] + common
     return ["Rscript", str(_R_WORKER)] + common
 
 
-def _dispatch_one(task, instance_root, result_dir, log_dir, task_dir, wall_time_cap):
+def _dispatch_one(task, instance_root, result_dir, log_dir, task_dir, wall_time_cap,
+                  machine_id="", git_commit="", environment_hash=""):
     run_id = task["run_id"]
     task_json = Path(task_dir) / f"{run_id}.task.json"
     task_json.write_text(json.dumps(task))
-    cmd = _worker_command(task, task_json, instance_root, result_dir, log_dir)
+    cmd = _worker_command(task, task_json, instance_root, result_dir, log_dir,
+                          machine_id, git_commit, environment_hash)
     try:
         proc = subprocess.run(cmd, timeout=wall_time_cap, capture_output=True, text=True)
         status = "success" if proc.returncode == 0 else "worker_nonzero"
@@ -264,6 +276,9 @@ def run_batch(
     log_dir=None,
     confirmatory=False,
     selection=None,
+    machine_id="",
+    git_commit="",
+    environment_hash="",
 ) -> dict:
     """Dispatch a manifest's tasks to Python/R worker subprocesses.
 
@@ -299,7 +314,7 @@ def run_batch(
             futures = {
                 executor.submit(
                     _dispatch_one, t, str(instance_root), str(result_dir),
-                    str(log_dir), task_dir, wall_time_cap,
+                    str(log_dir), task_dir, wall_time_cap, machine_id, git_commit, environment_hash,
                 ): t
                 for t in todos
             }
@@ -351,6 +366,13 @@ def main(argv=None) -> int:
             only_dims=args.only_dims, only_run_ids=args.only_run_ids, log_dir=args.log_dir,
             confirmatory=args.confirmatory,
             selection=json.loads(Path(args.selection).read_text()) if args.selection else None,
+            machine_id=args.machine_id if args.machine_id is not None else socket.gethostname(),
+            git_commit=args.git_commit if args.git_commit is not None else _default_git_commit(),
+            environment_hash=(
+                args.environment_hash
+                if args.environment_hash is not None
+                else _default_environment_hash()
+            ),
         )
         print(json.dumps(summary, indent=2))
         return 0
