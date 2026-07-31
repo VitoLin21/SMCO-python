@@ -177,6 +177,34 @@ def test_build_confirmatory_manifest_rejects_development_instances():
     assert all("confirmatory_" in t["instance_artifact_dir"] for t in manifest["tasks"])
 
 
+def test_build_confirmatory_manifest_rejects_missing_stage():
+    # P2: a confirmatory manifest must reject instance indexes whose entries
+    # lack a stage (or have an empty stage) — not just "development". A missing
+    # stage is ambiguous and must not pass the guard.
+    sel = _selection()
+    missing_index = {("Rastrigin", 200, 0): {
+        "function": "Rastrigin", "dimension": 200, "instance_id": 0,
+        "artifact_dir": "instances/confirmatory_Rastrigin_d200_i0",
+        "transform_sha256": "x", "start_points_hash": "y",
+    }}  # no "stage" key at all
+    with pytest.raises(ValueError, match="confirmatory-stage"):
+        build_confirmatory_manifest(
+            sel, stage="e2_factorial_highdim", suite="synthetic_highdim",
+            functions=["Rastrigin"], dims=[200], n_instances=1,
+            fe_budget_per_d=1000, checkpoints_per_d=(1000,),
+            instance_index=missing_index,
+        )
+    # an empty-string stage is also rejected
+    empty_index = {("Rastrigin", 200, 0): dict(missing_index[("Rastrigin", 200, 0)], stage="")}
+    with pytest.raises(ValueError, match="confirmatory-stage"):
+        build_confirmatory_manifest(
+            sel, stage="e2_factorial_highdim", suite="synthetic_highdim",
+            functions=["Rastrigin"], dims=[200], n_instances=1,
+            fe_budget_per_d=1000, checkpoints_per_d=(1000,),
+            instance_index=empty_index,
+        )
+
+
 def test_build_confirmatory_manifest_carries_closure_fields():
     manifest = _build_e2()
     assert manifest["frozen"] is True

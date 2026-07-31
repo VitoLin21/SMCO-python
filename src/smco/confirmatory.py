@@ -92,13 +92,16 @@ def build_confirmatory_manifest(
         # disjoint by design (plan §6); silently reusing development instances would
         # invalidate confirmatory inference. load_instance_index keys by
         # (function, dim, iid) and carries each entry's ``stage``.
-        inst_stages = {e.get("stage") for e in instance_index.values() if e.get("stage")}
-        if "development" in inst_stages:
+        # P2: require stage == "confirmatory" explicitly — reject development,
+        # missing/empty stage, and any other namespace (not just "development").
+        inst_stages = {e.get("stage") for e in instance_index.values()}
+        if inst_stages != {"confirmatory"}:
             raise ValueError(
-                f"confirmatory manifest (stage {stage!r}) must link confirmatory-stage "
-                f"instances, but the instance index has development-stage entries; "
-                f"development and confirmatory suites must use disjoint instances "
-                f"(generate with --suite-stage confirmatory and link that index)"
+                f"confirmatory manifest (stage {stage!r}) requires confirmatory-stage "
+                f"instances (every entry stage=='confirmatory'), but the index has "
+                f"stages {sorted(repr(s) for s in inst_stages)}; development and "
+                f"confirmatory suites must use disjoint instances (generate with "
+                f"--suite-stage confirmatory and link that index)"
             )
     winner = selection["winner"]
     language = selection.get("winner_language") or "python"
