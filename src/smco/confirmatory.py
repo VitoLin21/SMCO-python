@@ -587,6 +587,36 @@ def _run_ids_from_csv(path) -> set:
         return {row["run_id"] for row in csv.DictReader(f)}
 
 
+def _read_csv_rows(path) -> list:
+    """Read every physical row of a merged valid_runs.csv (duplicates kept).
+
+    Used for the physical-row / duplicate-run-id checks that the run-id SET hash
+    cannot catch (a duplicate row leaves the set unchanged)."""
+    with open(path, newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def _derive_component_metadata(manifest: dict, role: str) -> dict:
+    """Derive the component metadata straight from the (re-read) source manifest,
+    so the validator can compare it item-by-item against the composite's record
+    and reject a composite whose recorded stage/algorithms/selection_hash/
+    component_role/n_runs were edited after freezing."""
+    if role == "winner_base":
+        algorithms = sorted(
+            {manifest.get("winner_algorithm"), manifest.get("matched_base_algorithm")} - {None})
+        component_role = None
+    else:
+        algorithms = sorted(manifest.get("baseline_algorithms", []))
+        component_role = manifest.get("component_role")
+    return {
+        "stage": manifest.get("stage"),
+        "selection_hash": manifest.get("selection_hash"),
+        "algorithms": algorithms,
+        "component_role": component_role,
+        "n_runs": len(manifest.get("tasks") or []),
+    }
+
+
 def _run_id_set_sha256(run_ids) -> str:
     """SHA-256 of the sorted run_id set (order-independent)."""
     return hashlib.sha256(json.dumps(sorted(run_ids)).encode()).hexdigest()
@@ -833,6 +863,7 @@ def validate_composite(composite, *, e2_manifest_path=None,
          _BASELINE_EXPECTED_RUNS),
     ]
     for kind, mp, md, comp, err_fn, expected_runs in sources:
+        role = "winner_base" if kind == "E2" else "baseline_extension"
         if not mp or not Path(mp).exists():
             errors.append(f"{kind} manifest path missing: {mp!r}")
             continue
@@ -845,6 +876,18 @@ def validate_composite(composite, *, e2_manifest_path=None,
             errors.append(
                 f"{kind} manifest_sha256 != composite record (manifest regenerated after freeze)")
         errors += [f"{kind}: {e}" for e in err_fn(manifest)]
+        # Bind the component's recorded metadata to the re-read source manifest
+        # item-by-item (review P1): a composite whose stage/algorithms/
+        # selection_hash/component_role/n_runs were edited after freezing must
+        # be rejected even though the on-disk manifest is unchanged.
+        derived = _derive_component_metadata(manifest, role)
+        for field in ("stage", "selection_hash", "algorithms", "component_role"):
+            if comp.get(field) != derived[field]:
+                errors.append(
+                    f"{kind} component {field} {comp.get(field)!r} != manifest {derived[field]!r}")
+        if comp.get("n_runs") != derived["n_runs"]:
+            errors.append(
+                f"{kind} n_runs {comp.get('n_runs')} != manifest task count {derived['n_runs']}")
         vr = Path(md) / "valid_runs.csv"
         au = Path(md) / "provenance_audit.json"
         if not vr.exists():
@@ -854,17 +897,30 @@ def validate_composite(composite, *, e2_manifest_path=None,
             errors.append(f"{kind} valid_runs.csv hash mismatch (source modified after freeze)")
         if _file_sha256(au) != comp.get("audit_sha256"):
             errors.append(f"{kind} audit.json hash mismatch")
-        rids = _run_ids_from_csv(vr)
-        if _run_id_set_sha256(rids) != comp.get("run_id_set_sha256"):
+        # Physical rows + unique run-ids + duplicates (review P1): the run-id SET
+        # hash is blind to a duplicate row, so count physical rows explicitly.
+        rows = _read_csv_rows(vr)
+        physical = len(rows)
+        run_id_list = [r.get("run_id") for r in rows]
+        unique = len(set(run_id_list))
+        if physical != expected_runs:
+            errors.append(f"{kind} valid_runs has {physical} physical rows, expected {expected_runs}")
+        if unique != expected_runs:
+            errors.append(f"{kind} valid_runs has {unique} unique run-ids, expected {expected_runs}")
+        if physical != unique:
+            errors.append(f"{kind} valid_runs has {physical - unique} duplicate run-id row(s)")
+        if _run_id_set_sha256(set(run_id_list)) != comp.get("run_id_set_sha256"):
             errors.append(f"{kind} run_id set hash mismatch")
-        ok, msg = _audit_passes_provenance(json.loads(au.read_text()))
+        audit = json.loads(au.read_text())
+        ok, msg = _audit_passes_provenance(audit)
         if not ok:
             errors.append(f"{kind} {msg}")
+        if audit.get("n_rows") != physical:
+            errors.append(
+                f"{kind} audit n_rows {audit.get('n_rows')} != valid_runs physical rows {physical}")
         if comp.get("n_runs") != expected_runs:
             errors.append(f"{kind} n_runs {comp.get('n_runs')} != {expected_runs}")
-        if len(rids) != expected_runs:
-            errors.append(f"{kind} valid_runs has {len(rids)} rows, expected {expected_runs}")
-        if rids != _manifest_run_ids(manifest):
+        if set(run_id_list) != _manifest_run_ids(manifest):
             errors.append(f"{kind} valid_runs run-ids != manifest task run-ids")
         csv_map = _csv_identity_map(vr)
         for t in manifest["tasks"]:
@@ -918,12 +974,24 @@ def validate_e3_merged_against_composite(composite, merged_dir) -> list[str]:
         errors.append(
             f"merged run-ids ({len(final_rids)}) != composite union ({len(union)}); "
             f"only-in-merged={only_final} only-in-union={only_union}")
-    if len(final_rids) != 420:
-        errors.append(f"merged has {len(final_rids)} rows, expected 420")
+    # Physical rows + duplicates on the FINAL merged too (review P1): the union
+    # set check is blind to a duplicated row appended after merge.
+    rows = _read_csv_rows(vr)
+    physical = len(rows)
+    run_id_list = [r.get("run_id") for r in rows]
+    if physical != 420:
+        errors.append(f"merged has {physical} physical rows, expected 420")
+    if len(set(run_id_list)) != physical:
+        errors.append(
+            f"merged has {physical - len(set(run_id_list))} duplicate run-id row(s)")
     if au.exists():
-        ok, msg = _audit_passes_provenance(json.loads(au.read_text()))
+        audit = json.loads(au.read_text())
+        ok, msg = _audit_passes_provenance(audit)
         if not ok:
             errors.append(f"merged audit: {msg}")
+        if audit.get("n_rows") != physical:
+            errors.append(
+                f"merged audit n_rows {audit.get('n_rows')} != physical rows {physical}")
     else:
         errors.append(f"merged audit missing: {au}")
     # stage preservation: E2 rows keep their original stage, baseline rows keep

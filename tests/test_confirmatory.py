@@ -910,3 +910,60 @@ def test_e3_gate_rejects_when_composite_invalid(tmp_path):
     comp_path.write_text(json.dumps(comp))
     with pytest.raises(ValueError, match="composite validation"):
         enforce_e3_composite_gate(composite_path=str(comp_path), merged_dir=str(final))
+
+
+# --- P1 (review 2026-08-02): composite validator must bind component metadata
+#     to the source manifest and check physical CSV rows, not just the run-id set. ---
+def _valid_composite_with_files(tmp_path):
+    """Build a valid composite on disk; return (comp, paths dict)."""
+    comp, e2_mp, bc_mp, e2_dir, bc_dir, e2, bc = _build_valid_composite(tmp_path)
+    return comp, {"e2_mp": e2_mp, "bc_mp": bc_mp, "e2_dir": e2_dir, "bc_dir": bc_dir}
+
+
+def _rehash(comp):
+    from smco.confirmatory import composite_sha256
+    comp["composite_sha256"] = composite_sha256(comp)
+    return comp
+
+
+def test_composite_rejects_component_stage_tamper(tmp_path):
+    comp, _ = _valid_composite_with_files(tmp_path)
+    comp["components"]["winner_base"]["stage"] = "FAKE_STAGE"
+    _rehash(comp)
+    errs = validate_composite(comp)
+    assert any("stage" in e and "manifest" in e for e in errs)
+
+
+def test_composite_rejects_component_algorithms_tamper(tmp_path):
+    comp, _ = _valid_composite_with_files(tmp_path)
+    comp["components"]["winner_base"]["algorithms"] = ["FAKE"]
+    _rehash(comp)
+    errs = validate_composite(comp)
+    assert any("algorithms" in e and "manifest" in e for e in errs)
+
+
+def test_composite_rejects_joint_selection_hash_tamper(tmp_path):
+    # edit the composite + BOTH components' selection_hash together
+    comp, _ = _valid_composite_with_files(tmp_path)
+    comp["selection_hash"] = "JOINT"
+    comp["components"]["winner_base"]["selection_hash"] = "JOINT"
+    comp["components"]["baseline_extension"]["selection_hash"] = "JOINT"
+    _rehash(comp)
+    errs = validate_composite(comp)
+    assert any("selection_hash" in e and "manifest" in e for e in errs)
+
+
+def test_composite_rejects_duplicate_csv_row(tmp_path):
+    import hashlib
+    comp, p = _valid_composite_with_files(tmp_path)
+    bc_vr = p["bc_dir"] / "valid_runs.csv"
+    lines = bc_vr.read_text().splitlines()
+    # append a duplicate of the first data row (same run_id) -> physical 301
+    bc_vr.write_text("\n".join(lines + [lines[1]]) + "\n")
+    # update the recorded valid_runs hash to match the tampered file so ONLY the
+    # physical-row / audit-n_rows check catches it
+    comp["components"]["baseline_extension"]["valid_runs_sha256"] = hashlib.sha256(
+        bc_vr.read_bytes()).hexdigest()
+    _rehash(comp)
+    errs = validate_composite(comp)
+    assert any("physical" in e or "duplicate" in e or "audit n_rows" in e for e in errs)
