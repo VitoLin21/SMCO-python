@@ -93,7 +93,7 @@ def _resolve_statistics_inputs(args, parser):
                 "it requires its dedicated Task-12 analysis and cannot use primary_table")
         else:
             parser.error(f"artifact {target['key']!r} has no supported analysis_kind")
-        return merged_dir, algos
+        return merged_dir, algos, analysis_kind
 
     if not args.development:
         parser.error(
@@ -117,9 +117,11 @@ def _resolve_statistics_inputs(args, parser):
         except (ValueError, FileNotFoundError) as exc:
             parser.error(f"E3 composite gate failed: {exc}")
         algos = json.loads(Path(args.composite).read_text())["algorithms"]
+        analysis_kind = "comparative"
     else:
         algos = [c["algorithm_id"] for c in selection_candidates()]
-    return merged_dir, algos
+        analysis_kind = "selection_matrix"
+    return merged_dir, algos, analysis_kind
 
 
 def _algorithms_in_merged_dir(merged_dir) -> set[str]:
@@ -170,10 +172,16 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     if args.statistics:
-        merged_dir, algos = _resolve_statistics_inputs(args, parser)
-        from smco.paper_analysis import write_primary_table
+        merged_dir, algos, analysis_kind = _resolve_statistics_inputs(args, parser)
+        from smco.paper_analysis import write_pairwise_table, write_primary_table
         table = write_primary_table(merged_dir, args.out_dir, algos)
         print(f"wrote {args.out_dir}/primary_table.csv ({len(table)} algorithms)")
+        # comparative analysis also emits the pairwise Holm/superiority table
+        # (Task 12): is the proposed method significantly different from each
+        # baseline / the matched base, including where a baseline beats it.
+        if analysis_kind == "comparative":
+            pairs = write_pairwise_table(merged_dir, args.out_dir, algos)
+            print(f"wrote {args.out_dir}/pairwise_table.csv ({len(pairs)} pairs)")
         return 0
 
     if not args.selection_only:

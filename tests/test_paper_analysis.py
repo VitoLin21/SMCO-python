@@ -153,3 +153,84 @@ def test_package_report_traces_numbers(tmp_path):
     assert "PY-SP-SMCO-EVO" in text
     assert "0.42" in text  # ecdf_auc traced
     assert "s1" in text     # selection_hash traced
+
+
+# --- Task-12 pairwise Holm/superiority (review §9) ---
+
+def _prow(algo, func, dim, inst, gap):
+    return {"algorithm_id": algo, "function": func, "dimension": dim, "instance": inst,
+            "status": "success", "normalized_gap": gap, "wall_time_sec": 1.0,
+            "fe_budget": dim * 1000, "target_hit_fe_1e-1": "", "target_hit_fe_1e-2": "",
+            "target_hit_fe_1e-3": "", "target_hit_fe_1e-5": ""}
+
+
+def test_pairwise_table_detects_a_beats_b():
+    # A consistently reaches a lower (better) normalized_gap than B on shared
+    # problems -> median_log_gap_diff(A-B) < 0, prob_a_better ~1, small p.
+    from smco.paper_analysis import pairwise_table
+    rows = []
+    for i, g in enumerate([0.01, 0.02, 0.015, 0.03, 0.005]):
+        rows += [_prow("A", "f", 200, i, g), _prow("B", "f", 200, i, g * 10)]
+    table = pairwise_table(rows, ["A", "B"], n_boot=500, seed=0)
+    assert len(table) == 1
+    r = table[0]
+    assert r["algorithm_a"] == "A" and r["algorithm_b"] == "B"
+    assert r["n_pairs"] == 5
+    assert r["median_log_gap_diff"] < 0          # A better (lower gap)
+    assert r["prob_a_better"] == 1.0             # A beats B on every pair
+    assert r["p_value"] < 0.05                   # significant
+    assert r["p_holm"] >= r["p_value"]           # Holm never decreases p
+
+
+def test_pairwise_table_no_signal_is_not_significant():
+    # A and B exchange wins ~symmetrically -> large p, prob_a_better ~0.5.
+    from smco.paper_analysis import pairwise_table
+    gaps_a = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08]
+    gaps_b = [0.02, 0.01, 0.04, 0.03, 0.06, 0.05, 0.08, 0.07]  # swap pairs
+    rows = []
+    for i in range(len(gaps_a)):
+        rows += [_prow("A", "f", 200, i, gaps_a[i]), _prow("B", "f", 200, i, gaps_b[i])]
+    table = pairwise_table(rows, ["A", "B"], n_boot=500, seed=0)
+    r = table[0]
+    assert abs(r["median_log_gap_diff"]) < 0.5
+    assert 0.3 <= r["prob_a_better"] <= 0.7
+    assert r["p_value"] > 0.05                   # not significant
+
+
+def test_pairwise_only_pairs_shared_problems():
+    # problems present for A but not B are not counted in n_pairs
+    from smco.paper_analysis import pairwise_table
+    rows = [_prow("A", "f", 200, 0, 0.01), _prow("B", "f", 200, 0, 0.5),
+            _prow("A", "f", 200, 1, 0.01)]  # instance 1 only for A
+    table = pairwise_table(rows, ["A", "B"], n_boot=200, seed=0)
+    assert table[0]["n_pairs"] == 1
+
+
+def test_pairwise_holm_across_many_pairs():
+    # 3 algos => 3 pairs; Holm adjusted p is monotone >= raw p
+    from smco.paper_analysis import pairwise_table
+    rows = []
+    for i, g in enumerate([0.01, 0.02, 0.03]):
+        rows += [_prow("A", "f", 200, i, g), _prow("B", "f", 200, i, g * 5),
+                 _prow("C", "f", 200, i, g * 20)]
+    table = pairwise_table(rows, ["A", "B", "C"], n_boot=300, seed=0)
+    assert len(table) == 3
+    assert all(r["p_holm"] is not None for r in table)
+    assert all(r["p_holm"] >= r["p_value"] - 1e-9 for r in table)
+
+
+def test_write_pairwise_table_csv(tmp_path):
+    from smco.paper_analysis import write_pairwise_table
+    import csv as _csv
+    d = tmp_path / "merged"; d.mkdir()
+    rows = []
+    for i, g in enumerate([0.01, 0.02]):
+        rows += [_prow("A", "f", 200, i, g), _prow("B", "f", 200, i, g * 8)]
+    with open(d / "valid_runs.csv", "w", newline="") as f:
+        w = _csv.DictWriter(f, fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)
+    (d / "provenance_audit.json").write_text(json.dumps({"passed": True}))
+    table = write_pairwise_table(str(d), str(tmp_path / "out"), ["A", "B"], n_boot=200)
+    written = list(_csv.DictReader(open(tmp_path / "out" / "pairwise_table.csv")))
+    assert len(written) == 1
+    assert {written[0]["algorithm_a"], written[0]["algorithm_b"]} == {"A", "B"}
+    assert written[0]["p_holm"] != ""
