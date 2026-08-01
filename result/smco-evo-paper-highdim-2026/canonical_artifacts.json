@@ -1,6 +1,7 @@
 {
   "schema_version": "1",
-  "generated_from_git_commit": "407f30e38ffdccb0e80c656cbc857abd7f95a59c",
+  "generated_from_git_commit": "07ae4e05e4a538143c08b11517304ca38b0bbda7",
+  "frozen": true,
   "artifacts": [
     {
       "key": "e1_merged",
@@ -8,7 +9,8 @@
       "kind": "merged",
       "status": "canonical",
       "row_count": 1080,
-      "sha256": "50c8b865464db2dc9700b27edbd5ed22b6afa8d08f8e06aa83abe37b1677b56b",
+      "valid_runs_sha256": "50c8b865464db2dc9700b27edbd5ed22b6afa8d08f8e06aa83abe37b1677b56b",
+      "audit_sha256": "a80af69f202e03f19adad1827d170407ac0c0b6d0bc3ca1107be59563862c5f7",
       "passed": true,
       "n_rows": 1080,
       "n_checks": 12,
@@ -38,7 +40,8 @@
       "kind": "merged",
       "status": "canonical",
       "row_count": 120,
-      "sha256": "68d668fcdaa7cf9aef2fe5dbb99ceea1535b39c0cdf54d2ff11b2302a1779059",
+      "valid_runs_sha256": "68d668fcdaa7cf9aef2fe5dbb99ceea1535b39c0cdf54d2ff11b2302a1779059",
+      "audit_sha256": "53906663af90677e5a89b8104e90caf5282d6750bc5162bc10c62b932c8add7b",
       "passed": true,
       "n_rows": 120,
       "n_checks": 12,
@@ -61,7 +64,8 @@
       "kind": "merged",
       "status": "canonical",
       "row_count": 300,
-      "sha256": "48519ed7030249844f2cb0060fae64981c15b97363f66fb38664d1cd17b15f4a",
+      "valid_runs_sha256": "48519ed7030249844f2cb0060fae64981c15b97363f66fb38664d1cd17b15f4a",
+      "audit_sha256": "80f5020e81defae7bf11e97a622bf3a9f6be4b1ba04f7aeb2c8b3d445f801562",
       "passed": true,
       "n_rows": 300,
       "n_checks": 12,
@@ -83,7 +87,8 @@
       "kind": "merged",
       "status": "canonical",
       "row_count": 420,
-      "sha256": "e4fe7af8ba92832db246226961d81c85bfc151a09d265e8b105af6dd6ac33e15",
+      "valid_runs_sha256": "e4fe7af8ba92832db246226961d81c85bfc151a09d265e8b105af6dd6ac33e15",
+      "audit_sha256": "dd6e882dc8d3a0d309c4d64adc3e26bd306d21a0f8254770b746c45ab33bfb32",
       "passed": true,
       "n_rows": 420,
       "n_checks": 12,
@@ -99,7 +104,8 @@
       "kind": "merged",
       "status": "canonical",
       "row_count": 420,
-      "sha256": "c0061717fbd758e8443d3bef42657db22ea8d4f8043d15f8fde2909fd5e4867d",
+      "valid_runs_sha256": "c0061717fbd758e8443d3bef42657db22ea8d4f8043d15f8fde2909fd5e4867d",
+      "audit_sha256": "dd6e882dc8d3a0d309c4d64adc3e26bd306d21a0f8254770b746c45ab33bfb32",
       "passed": true,
       "n_rows": 420,
       "n_checks": 12,
@@ -121,7 +127,8 @@
       "kind": "merged",
       "status": "canonical",
       "row_count": 180,
-      "sha256": "9dbd4f9c52ab70d407989746cf27cb1e08e10309197b0bf6553c66dbb965f827",
+      "valid_runs_sha256": "9dbd4f9c52ab70d407989746cf27cb1e08e10309197b0bf6553c66dbb965f827",
+      "audit_sha256": "4f0754569a92c817450d08602908254fa4fc747f70a5eacbb34f31218dbb85bd",
       "passed": true,
       "n_rows": 180,
       "n_checks": 12,
@@ -150,5 +157,6 @@
       "kind": "dir",
       "status": "deferred"
     }
-  ]
+  ],
+  "index_sha256": "a1055714d83e0e5c7f75acda344b1cfcf8ad7f8637500df620c2efd431d45c9b"
 }
