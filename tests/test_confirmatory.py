@@ -419,63 +419,217 @@ def test_baseline_component_role_alone_cannot_bypass_gate_f():
     assert errors  # empty task matrix rejected — Gate-F not bypassed
 
 
-def _write_mock_merged(tmp, run_ids, passed=True):
-    import csv
+# --- P1c strict: comparative composite (review §5) ---
+# The formal composite is exactly 120 (E2 winner+base) + 300 (baselines) = 420.
+# build_comparative_composite verifies both sources before freezing; the formal
+# validator only accepts 120+300 and recomputes every hash from disk.
+
+_E3_EXPECTED_ALGOS = {"PY-SP-SMCO-EVO", "PY-BASE-SMCO",
+                      "DE", "GA", "PSO", "SA", "GenSA"}
+
+
+def _build_full_e2(sel_hash="bcf87965006220a0"):
+    sel = {"winner": "PY-SP-SMCO-EVO", "winner_language": "python",
+           "selection_hash": sel_hash}
+    return build_confirmatory_manifest(
+        sel, stage="e2_factorial_highdim", suite="synthetic_highdim",
+        functions=list(_E3_FUNCTIONS), dims=list(_E3_DIMS), n_instances=5,
+        fe_budget_per_d=1000, checkpoints_per_d=(1000,),
+        instance_index=_confirmatory_instance_index(),
+    )
+
+
+def _write_component_merged(tmp, manifest, *, n_checks=12, provenance_passed=True,
+                            drop_run_id=None, tamper_algo=None, extra_run_id=None):
+    """Write a minimal merged/ dir (valid_runs.csv + provenance_audit.json) whose
+    run-ids match ``manifest`` tasks. Only the columns the composite validator
+    inspects (run_id/algorithm_id/stage) are written."""
+    import csv as _csv
     d = tmp / "merged"; d.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for t in manifest["tasks"]:
+        rid = t["run_id"]
+        if drop_run_id is not None and rid == drop_run_id:
+            continue
+        algo = t.get("algorithm_id") or t.get("algorithm")
+        if tamper_algo is not None and rid == tamper_algo[0]:
+            algo = tamper_algo[1]
+        rows.append({"run_id": rid, "algorithm_id": algo, "stage": t.get("stage")})
+    if extra_run_id is not None:
+        rows.append({"run_id": extra_run_id, "algorithm_id": "DE",
+                     "stage": "e3_companion_baselines"})
     with open(d / "valid_runs.csv", "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["run_id"]); w.writeheader()
-        for r in run_ids: w.writerow({"run_id": r})
-    (d / "provenance_audit.json").write_text(
-        json.dumps({"passed": passed, "checks": [], "n_rows": len(run_ids)}))
+        w = _csv.DictWriter(f, fieldnames=["run_id", "algorithm_id", "stage"])
+        w.writeheader(); w.writerows(rows)
+    checks = [{"name": f"check_{i}", "passed": True, "n": len(rows), "errors": []}
+              for i in range(max(0, n_checks))]
+    if n_checks >= 12:
+        # the 12th check is provenance_complete (the audit key the composite gate
+        # requires); without it the audit is the old 11-check version.
+        checks[-1] = {"name": "provenance_complete", "passed": provenance_passed,
+                      "n": len(rows), "errors": []}
+    audit = {"passed": all(c["passed"] for c in checks), "failed_checks": [],
+             "checks": checks, "n_rows": len(rows)}
+    (d / "provenance_audit.json").write_text(json.dumps(audit))
     return d
 
 
-def test_composite_passes_and_rejects_modified_source(tmp_path):
-    """P1c constraints 1-3: composite validates dual audit + content hash +
-    selection_hash; modifying valid_runs.csv after freeze → hash mismatch."""
-    import json as _json
-    e2_m = {"manifest_sha256": "abc", "stage": "e2_factorial_highdim",
-            "winner_algorithm": "PY-SP-SMCO-EVO",
-            "matched_base_algorithm": "PY-BASE-SMCO", "selection_hash": "sh1"}
-    bc_m = {"manifest_sha256": "def", "stage": "e3_companion_baselines",
-            "baseline_algorithms": ["DE", "GA", "PSO", "SA", "GenSA"],
-            "selection_hash": "sh1", "component_role": "baseline_extension"}
-    (tmp_path / "e2m.json").write_text(_json.dumps(e2_m))
-    (tmp_path / "bcm.json").write_text(_json.dumps(bc_m))
-    e2_dir = _write_mock_merged(tmp_path / "e2", [f"e2_{i}" for i in range(5)])
-    bc_dir = _write_mock_merged(tmp_path / "bc", [f"bc_{i}" for i in range(5)])
-    composite = build_comparative_composite(
-        e2_manifest_path=str(tmp_path / "e2m.json"), e2_merged_dir=str(e2_dir),
-        baseline_component_path=str(tmp_path / "bcm.json"), baseline_merged_dir=str(bc_dir))
-    assert composite["total_runs"] == 10
-    assert len(composite["algorithms"]) == 7
-    assert validate_composite(composite, e2_merged_dir=str(e2_dir),
-                              baseline_merged_dir=str(bc_dir)) == []
-    # constraint 1: modify source valid_runs.csv → hash mismatch
-    with open(e2_dir / "valid_runs.csv", "a") as f:
-        f.write("tampered\n")
-    errors = validate_composite(composite, e2_merged_dir=str(e2_dir),
-                                baseline_merged_dir=str(bc_dir))
-    assert any("hash mismatch" in e for e in errors)
+def _component_dir(tmp_path, name):
+    return tmp_path / name / "merged"
 
 
-def test_composite_rejects_selection_hash_mismatch(tmp_path):
-    """P1c constraint 3: E2 vs baseline selection_hash mismatch → ValueError."""
-    import json as _json
-    e2_m = {"manifest_sha256": "abc", "stage": "e2_factorial_highdim",
-            "winner_algorithm": "PY-SP-SMCO-EVO",
-            "matched_base_algorithm": "PY-BASE-SMCO", "selection_hash": "sh1"}
-    bc_m = {"manifest_sha256": "def", "stage": "e3_companion_baselines",
-            "baseline_algorithms": ["DE", "GA", "PSO", "SA", "GenSA"],
-            "selection_hash": "DIFFERENT", "component_role": "baseline_extension"}
-    (tmp_path / "e2m.json").write_text(_json.dumps(e2_m))
-    (tmp_path / "bcm.json").write_text(_json.dumps(bc_m))
-    e2_dir = _write_mock_merged(tmp_path / "e2", ["e2_0"])
-    bc_dir = _write_mock_merged(tmp_path / "bc", ["bc_0"])
+def _build_valid_composite(tmp_path, *, e2_sel="bcf87965006220a0",
+                           bc_sel="bcf87965006220a0"):
+    e2 = _build_full_e2(sel_hash=e2_sel)
+    bc = _build_full_baseline_component(sel_hash=bc_sel)
+    e2_mp = tmp_path / "e2m.json"; e2_mp.write_text(json.dumps(e2))
+    bc_mp = tmp_path / "bcm.json"; bc_mp.write_text(json.dumps(bc))
+    e2_dir = _write_component_merged(tmp_path / "e2", e2)
+    bc_dir = _write_component_merged(tmp_path / "bc", bc)
+    comp = build_comparative_composite(
+        e2_manifest_path=str(e2_mp), e2_merged_dir=str(e2_dir),
+        baseline_component_path=str(bc_mp), baseline_merged_dir=str(bc_dir))
+    return comp, e2_mp, bc_mp, e2_dir, bc_dir, e2, bc
+
+
+def test_composite_full_420_passes_and_revalidates(tmp_path):
+    comp, *_ = _build_valid_composite(tmp_path)
+    assert comp["schema_version"] == "1"
+    assert comp["composite_type"] == "comparative_composite"
+    assert comp["stage"] == "e3_comparative_analysis"
+    assert comp["suite"] == "synthetic_highdim"
+    assert comp["frozen"] is True
+    assert comp["total_runs"] == 420
+    assert set(comp["algorithms"]) == _E3_EXPECTED_ALGOS
+    assert comp["components"]["winner_base"]["n_runs"] == 120
+    assert comp["components"]["baseline_extension"]["n_runs"] == 300
+    # validator recomputes every hash from the recorded paths and passes
+    assert validate_composite(comp) == []
+
+
+def test_composite_rejects_tampered_composite_hash(tmp_path):
+    comp, *_ = _build_valid_composite(tmp_path)
+    comp["composite_sha256"] = "0" * 64  # do NOT recompute -> mismatch
+    errors = validate_composite(comp)
+    assert any("composite_sha256" in e for e in errors)
+
+
+def test_composite_rejects_frozen_false(tmp_path):
+    from smco.confirmatory import composite_sha256
+    comp, *_ = _build_valid_composite(tmp_path)
+    comp["frozen"] = False
+    comp["composite_sha256"] = composite_sha256(comp)  # keep hash consistent
+    errors = validate_composite(comp)
+    assert any("frozen" in e.lower() for e in errors)
+
+
+def test_composite_rejects_wrong_schema_type_stage_suite(tmp_path):
+    from smco.confirmatory import composite_sha256
+    comp, *_ = _build_valid_composite(tmp_path)
+    for bad in ({"schema_version": "9"}, {"composite_type": "other"},
+                {"stage": "e9"}, {"suite": "other"}):
+        c = json.loads(json.dumps(comp))
+        c.update(bad)
+        c["composite_sha256"] = composite_sha256(c)
+        assert validate_composite(c), f"expected failure for {bad}"
+
+
+def test_composite_rejects_modified_e2_manifest(tmp_path):
+    # regenerate the E2 manifest on disk (new hash) after the composite froze
+    comp, e2_mp, *_ = _build_valid_composite(tmp_path)
+    e2 = json.loads(e2_mp.read_text())
+    e2["tasks"][0]["dimension"] = 777
+    e2["manifest_sha256"] = manifest_sha256(e2)
+    e2_mp.write_text(json.dumps(e2))
+    errors = validate_composite(comp)
+    assert any("manifest_sha256" in e or "E2" in e for e in errors)
+
+
+def test_composite_rejects_wrong_component_n_runs(tmp_path):
+    from smco.confirmatory import composite_sha256
+    for bad in (1, 119, 299, 301):
+        comp, *_ = _build_valid_composite(tmp_path)
+        comp["components"]["baseline_extension"]["n_runs"] = bad
+        comp["composite_sha256"] = composite_sha256(comp)
+        errors = validate_composite(comp)
+        assert any("300" in e or "n_runs" in e for e in errors), bad
+
+
+def test_composite_rejects_wrong_total_runs(tmp_path):
+    from smco.confirmatory import composite_sha256
+    for bad in (419, 421):
+        comp, *_ = _build_valid_composite(tmp_path)
+        comp["total_runs"] = bad
+        comp["composite_sha256"] = composite_sha256(comp)
+        errors = validate_composite(comp)
+        assert any("420" in e or "total" in e.lower() for e in errors), bad
+
+
+def test_composite_rejects_csv_with_non_manifest_run_id(tmp_path):
+    # same row count, but swap one row's algorithm to one not matching manifest
+    comp, _, _, _, bc_dir, _, bc = _build_valid_composite(tmp_path)
+    _write_component_merged(bc_dir.parent, bc,
+                            tamper_algo=(bc["tasks"][0]["run_id"], "PSO"))
+    errors = validate_composite(comp)
+    assert errors  # valid_runs hash + run_id-set hash + identity mismatch
+
+
+def test_composite_rejects_csv_extra_run_id(tmp_path):
+    comp, _, _, _, bc_dir, _, bc = _build_valid_composite(tmp_path)
+    _write_component_merged(bc_dir.parent, bc, extra_run_id="bBOGUS00000000000")
+    errors = validate_composite(comp)
+    assert any("run_id" in e.lower() or "hash mismatch" in e for e in errors)
+
+
+def test_composite_builder_rejects_old_11check_audit(tmp_path):
+    e2 = _build_full_e2(); bc = _build_full_baseline_component()
+    e2_mp = tmp_path / "e2m.json"; e2_mp.write_text(json.dumps(e2))
+    bc_mp = tmp_path / "bcm.json"; bc_mp.write_text(json.dumps(bc))
+    _write_component_merged(tmp_path / "e2", e2)
+    _write_component_merged(tmp_path / "bc", bc, n_checks=11)  # old audit
+    with pytest.raises(ValueError, match="provenance|audit|11"):
+        build_comparative_composite(
+            e2_manifest_path=str(e2_mp), e2_merged_dir=str(_component_dir(tmp_path, "e2")),
+            baseline_component_path=str(bc_mp), baseline_merged_dir=str(_component_dir(tmp_path, "bc")))
+
+
+def test_composite_builder_rejects_failed_provenance(tmp_path):
+    e2 = _build_full_e2(); bc = _build_full_baseline_component()
+    e2_mp = tmp_path / "e2m.json"; e2_mp.write_text(json.dumps(e2))
+    bc_mp = tmp_path / "bcm.json"; bc_mp.write_text(json.dumps(bc))
+    _write_component_merged(tmp_path / "e2", e2)
+    _write_component_merged(tmp_path / "bc", bc, provenance_passed=False)
+    with pytest.raises(ValueError, match="provenance|audit"):
+        build_comparative_composite(
+            e2_manifest_path=str(e2_mp), e2_merged_dir=str(_component_dir(tmp_path, "e2")),
+            baseline_component_path=str(bc_mp), baseline_merged_dir=str(_component_dir(tmp_path, "bc")))
+
+
+def test_composite_builder_rejects_run_id_overlap(tmp_path):
+    e2 = _build_full_e2(); bc = _build_full_baseline_component()
+    e2_mp = tmp_path / "e2m.json"; e2_mp.write_text(json.dumps(e2))
+    bc_mp = tmp_path / "bcm.json"; bc_mp.write_text(json.dumps(bc))
+    _write_component_merged(tmp_path / "e2", e2)
+    # inject an E2 run_id into the baseline CSV -> overlap
+    _write_component_merged(tmp_path / "bc", bc, extra_run_id=e2["tasks"][0]["run_id"])
+    with pytest.raises(ValueError, match="overlap"):
+        build_comparative_composite(
+            e2_manifest_path=str(e2_mp), e2_merged_dir=str(_component_dir(tmp_path, "e2")),
+            baseline_component_path=str(bc_mp), baseline_merged_dir=str(_component_dir(tmp_path, "bc")))
+
+
+def test_composite_builder_rejects_selection_hash_mismatch(tmp_path):
+    # E2 and baseline carry different selection_hash -> builder rejects
+    e2 = _build_full_e2(sel_hash="HASH_A")
+    bc = _build_full_baseline_component(sel_hash="HASH_B")
+    e2_mp = tmp_path / "e2m.json"; e2_mp.write_text(json.dumps(e2))
+    bc_mp = tmp_path / "bcm.json"; bc_mp.write_text(json.dumps(bc))
+    _write_component_merged(tmp_path / "e2", e2)
+    _write_component_merged(tmp_path / "bc", bc)
     with pytest.raises(ValueError, match="selection_hash"):
         build_comparative_composite(
-            e2_manifest_path=str(tmp_path / "e2m.json"), e2_merged_dir=str(e2_dir),
-            baseline_component_path=str(tmp_path / "bcm.json"), baseline_merged_dir=str(bc_dir))
+            e2_manifest_path=str(e2_mp), e2_merged_dir=str(_component_dir(tmp_path, "e2")),
+            baseline_component_path=str(bc_mp), baseline_merged_dir=str(_component_dir(tmp_path, "bc")))
 
 
 def test_build_confirmatory_manifest_carries_closure_fields():
