@@ -244,6 +244,24 @@ def test_build_baseline_component_rejects_wrong_baselines():
         )
 
 
+def test_component_gate_f_conditional_skip():
+    """P1c constraint 3: a valid baseline_extension component passes Gate-F
+    without winner_config_hash; one missing a structural constraint does not."""
+    sel = _selection()
+    # valid component — no winner_config_hash, no winner in tasks → must pass
+    manifest = build_baseline_component_manifest(
+        sel, functions=["Rastrigin"], dims=[200], n_instances=1,
+        fe_budget_per_d=1000, checkpoints_per_d=(1000,),
+    )
+    assert confirmatory_errors(manifest, selection=sel) == []
+    # tamper: remove selection_hash → no longer a valid component → must fail
+    # (treated as ordinary manifest missing winner checks)
+    manifest["selection_hash"] = None
+    manifest["manifest_sha256"] = manifest_sha256(manifest)
+    errors = confirmatory_errors(manifest, selection=sel)
+    assert any("selection_hash" in e or "winner" in e for e in errors)
+
+
 def test_build_confirmatory_manifest_carries_closure_fields():
     manifest = _build_e2()
     assert manifest["frozen"] is True

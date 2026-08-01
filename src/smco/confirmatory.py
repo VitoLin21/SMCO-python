@@ -141,6 +141,19 @@ def build_confirmatory_manifest(
     return freeze_manifest(manifest)
 
 
+def _is_baseline_extension(manifest: dict) -> bool:
+    """P1c constraint 3: True only when ALL structural conditions for a
+    baseline_extension component are met. Missing any → treated as ordinary
+    confirmatory manifest (no Gate-F bypass)."""
+    return (
+        manifest.get("component_role") == "baseline_extension"
+        and manifest.get("stage") == _BASELINE_EXTENSION_STAGE
+        and manifest.get("suite") == _BASELINE_EXTENSION_SUITE
+        and tuple(manifest.get("baseline_algorithms", ())) == _BASELINE_EXTENSION_BASELINES
+        and manifest.get("selection_hash") is not None
+    )
+
+
 def confirmatory_errors(manifest: dict, *, selection: dict | None = None) -> list[str]:
     """Return Gate-F violations for a confirmatory manifest (empty == ok)."""
     errors: list[str] = []
@@ -154,17 +167,23 @@ def confirmatory_errors(manifest: dict, *, selection: dict | None = None) -> lis
     tasks = manifest.get("tasks", [])
     # A-03: selection-driven closure — every task algorithm must be in the
     # frozen allowed set, and the winner's configuration_hash must be present.
+    # P1c constraint 3: a valid baseline_extension component (stage/suite/
+    # baselines/selection_hash all correct) intentionally has no winner — skip
+    # winner-present checks. Any other manifest (including one that claims
+    # component_role but misses a structural constraint) is checked normally.
+    is_component = _is_baseline_extension(manifest)
     allowed = manifest.get("allowed_algorithms")
     if allowed is not None:
         task_algos = {t.get("algorithm_id") or t.get("algorithm") for t in tasks}
         extra = sorted(task_algos - set(allowed))
         if extra:
             errors.append(f"manifest has algorithms outside the allowed set: {extra}")
-    winner_hash = manifest.get("winner_config_hash")
-    if winner_hash and winner_hash != NONE_TOKEN:
-        if not any(t.get("configuration_hash") == winner_hash for t in tasks):
-            errors.append("winner_config_hash not present in any manifest task")
-    if selection is not None:
+    if not is_component:
+        winner_hash = manifest.get("winner_config_hash")
+        if winner_hash and winner_hash != NONE_TOKEN:
+            if not any(t.get("configuration_hash") == winner_hash for t in tasks):
+                errors.append("winner_config_hash not present in any manifest task")
+    if selection is not None and not is_component:
         winner = selection.get("winner")
         if not winner:
             errors.append("selection has no winner")
