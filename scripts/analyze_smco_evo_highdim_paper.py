@@ -41,9 +41,9 @@ def _resolve_statistics_inputs(args, parser):
     string or an arbitrary path. E3 statistics read the algorithm set from the
     validated composite and force the composite gate.
 
-    Bare ``--merged-dir`` is kept for E1/E2 only; if it points at E3 data it is
-    rejected (E3 must go through the index/composite so the gate cannot be
-    bypassed with the default stage).
+    Bare ``--merged-dir`` is development-only.  Confirmatory Task 12 always
+    resolves through the index; this keeps every table tied to the frozen
+    artifact contract rather than an arbitrary directory.
     """
     from smco.selection import selection_candidates
 
@@ -61,7 +61,8 @@ def _resolve_statistics_inputs(args, parser):
         except (ValueError, FileNotFoundError) as exc:
             parser.error(f"canonical index resolve failed: {exc}")
         merged_dir = target["merged_dir"]
-        if target["is_e3"]:
+        analysis_kind = target.get("analysis_kind")
+        if analysis_kind == "comparative":
             from smco.confirmatory import enforce_e3_composite_gate
             try:
                 enforce_e3_composite_gate(
@@ -69,14 +70,38 @@ def _resolve_statistics_inputs(args, parser):
             except (ValueError, FileNotFoundError) as exc:
                 parser.error(f"E3 composite gate failed: {exc}")
             algos = json.loads(Path(target["composite_path"]).read_text())["algorithms"]
-        else:
+        elif analysis_kind == "selection_matrix":
             algos = [c["algorithm_id"] for c in selection_candidates()]
+        elif analysis_kind == "winner_vs_base":
+            manifest_path = target.get("source_manifest_path")
+            if not manifest_path:
+                parser.error("winner_vs_base analysis target has no frozen source manifest")
+            try:
+                manifest = json.loads(Path(manifest_path).read_text())
+                algos = [manifest["winner_algorithm"], manifest["matched_base_algorithm"]]
+            except (KeyError, FileNotFoundError, json.JSONDecodeError) as exc:
+                parser.error(f"cannot resolve frozen E2 winner/base algorithms: {exc}")
+            if len(set(algos)) != 2 or not all(isinstance(a, str) and a for a in algos):
+                parser.error("frozen E2 manifest must name exactly two distinct algorithms")
+            actual_algos = _algorithms_in_merged_dir(merged_dir)
+            if actual_algos != set(algos):
+                parser.error(
+                    "E2 merged algorithms do not exactly match its frozen winner/base manifest")
+        elif analysis_kind in {"baseline_only", "strategy_ablation", "start_count_ablation"}:
+            parser.error(
+                f"artifact {target['key']!r} has analysis_kind={analysis_kind!r}; "
+                "it requires its dedicated Task-12 analysis and cannot use primary_table")
+        else:
+            parser.error(f"artifact {target['key']!r} has no supported analysis_kind")
         return merged_dir, algos
 
+    if not args.development:
+        parser.error(
+            "confirmatory --statistics requires --canonical-index + --artifact-key; "
+            "bare --merged-dir is development-only (pass --development)")
     if not args.merged_dir:
         parser.error(
-            "--statistics requires --canonical-index + --artifact-key (preferred) "
-            "or --merged-dir")
+            "--statistics --development requires --merged-dir")
     merged_dir = args.merged_dir
     # Defense-in-depth (review P0): default stage + E3 merged must still reject —
     # E3 data cannot bypass the composite gate via a bare --merged-dir.
@@ -95,6 +120,13 @@ def _resolve_statistics_inputs(args, parser):
     else:
         algos = [c["algorithm_id"] for c in selection_candidates()]
     return merged_dir, algos
+
+
+def _algorithms_in_merged_dir(merged_dir) -> set[str]:
+    """Read the observed algorithm IDs for a contract-bound algorithm check."""
+    with open(Path(merged_dir) / "valid_runs.csv", newline="") as handle:
+        return {row.get("algorithm_id") for row in csv.DictReader(handle)
+                if row.get("algorithm_id")}
 
 
 def main(argv=None) -> int:

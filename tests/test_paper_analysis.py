@@ -122,7 +122,11 @@ def test_analyze_cli_statistics(tmp_path):
              "target_hit_fe_1e-3": "", "target_hit_fe_1e-5": ""}]
     _merged_dir(tmp_path, rows)
     out_dir = tmp_path / "analysis"
-    rc = cli.main(["--statistics", "--merged-dir", str(tmp_path), "--out-dir", str(out_dir)])
+    # This fixture is intentionally an ad-hoc merged directory, so it exercises
+    # the explicitly labelled development escape hatch.  Formal Task 12 uses
+    # the canonical index and artifact key (covered in test_composite_cli).
+    rc = cli.main(["--statistics", "--development", "--merged-dir", str(tmp_path),
+                   "--out-dir", str(out_dir)])
     assert rc == 0
     assert (out_dir / "primary_table.csv").exists()
 

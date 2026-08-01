@@ -32,17 +32,23 @@ _PROVENANCE_CHECK_NAME = "provenance_complete"
 # provenance_audit.json), "file" (single JSON/CSV) or "dir" (existence-only).
 # This is the single source of truth — Task 12/13 resolve paths ONLY through it.
 CANONICAL_CONTRACT = {
-    "e1_merged": {"kind": "merged", "status": "canonical", "row_count": 1080},
+    "e1_merged": {"kind": "merged", "status": "canonical", "row_count": 1080,
+                  "analysis_kind": "selection_matrix"},
     "e1_selection": {"kind": "file", "status": "canonical"},
     "e2_manifest": {"kind": "file", "status": "canonical"},
-    "e2_merged": {"kind": "merged", "status": "canonical", "row_count": 120},
+    "e2_merged": {"kind": "merged", "status": "canonical", "row_count": 120,
+                  "analysis_kind": "winner_vs_base"},
     "e3_baseline_component_manifest": {"kind": "file", "status": "canonical"},
-    "e3_baseline_merged": {"kind": "merged", "status": "canonical", "row_count": 300},
+    "e3_baseline_merged": {"kind": "merged", "status": "canonical", "row_count": 300,
+                           "analysis_kind": "baseline_only"},
     "e3_composite": {"kind": "file", "status": "canonical"},
-    "e3_composite_merged": {"kind": "merged", "status": "canonical", "row_count": 420},
-    "e6_strategy_merged": {"kind": "merged", "status": "canonical", "row_count": 420},
+    "e3_composite_merged": {"kind": "merged", "status": "canonical", "row_count": 420,
+                            "analysis_kind": "comparative"},
+    "e6_strategy_merged": {"kind": "merged", "status": "canonical", "row_count": 420,
+                           "analysis_kind": "strategy_ablation"},
     "e6_start_count_manifest": {"kind": "file", "status": "canonical"},
-    "e6_start_count_merged": {"kind": "merged", "status": "canonical", "row_count": 180},
+    "e6_start_count_merged": {"kind": "merged", "status": "canonical", "row_count": 180,
+                              "analysis_kind": "start_count_ablation"},
     "e4_dev": {"kind": "file", "status": "development_only"},
     "e5_dev": {"kind": "file", "status": "development_only"},
     "e6_schedule": {"kind": "dir", "status": "deferred"},
@@ -53,6 +59,16 @@ CANONICAL_CONTRACT = {
 # the algorithm set from the composite, not from a user stage string).
 E3_MERGED_KEY = "e3_composite_merged"
 E3_COMPOSITE_KEY = "e3_composite"
+
+# Analysis semantics are fixed in this source-level contract, rather than being
+# user supplied CLI flags or mutable metadata in the index.  E2's two
+# algorithms are additionally bound to its frozen manifest.
+_ANALYSIS_SOURCE_MANIFEST_KEYS = {"e2_merged": "e2_manifest"}
+
+
+def _is_sha256(value) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(
+        char in "0123456789abcdef" for char in value.lower())
 
 
 def file_sha256(path) -> str:
@@ -193,7 +209,9 @@ def validate_canonical_index(index, *, root=".", contract=CANONICAL_CONTRACT) ->
         if want["kind"] == "merged":
             errors += _validate_merged_on_disk(key, entry, resolved, want)
         elif want["kind"] == "file":
-            if entry.get("sha256") and file_sha256(resolved) != entry["sha256"]:
+            if want["status"] == "canonical" and not _is_sha256(entry.get("sha256")):
+                errors.append(f"{key}: missing or invalid canonical file sha256")
+            elif entry.get("sha256") and file_sha256(resolved) != entry["sha256"]:
                 errors.append(f"{key}: file hash mismatch (changed after freeze)")
     return errors
 
@@ -210,9 +228,15 @@ def _validate_merged_on_disk(key, entry, resolved, want) -> list[str]:
     if not audit_path.exists():
         errors.append(f"{key}: missing provenance_audit.json")
         return errors
-    if entry.get("valid_runs_sha256") and file_sha256(valid_runs) != entry["valid_runs_sha256"]:
+    valid_runs_hash = entry.get("valid_runs_sha256")
+    audit_hash = entry.get("audit_sha256")
+    if want["status"] == "canonical" and not _is_sha256(valid_runs_hash):
+        errors.append(f"{key}: missing or invalid canonical valid_runs_sha256")
+    elif valid_runs_hash and file_sha256(valid_runs) != valid_runs_hash:
         errors.append(f"{key}: valid_runs.csv hash mismatch (changed after freeze)")
-    if entry.get("audit_sha256") and file_sha256(audit_path) != entry["audit_sha256"]:
+    if want["status"] == "canonical" and not _is_sha256(audit_hash):
+        errors.append(f"{key}: missing or invalid canonical audit_sha256")
+    elif audit_hash and file_sha256(audit_path) != audit_hash:
         errors.append(f"{key}: provenance_audit.json hash mismatch (changed after freeze)")
     if entry.get("status") == "canonical":
         summary = merged_audit_summary(resolved)
@@ -232,7 +256,7 @@ def resolve_analysis_target(index, key, *, root=".") -> dict:
     """Resolve a Task-12 analysis target by artifact key (review P0): Task 12/13
     must take inputs from the canonical index, never an arbitrary merged path.
 
-    Returns ``{key, merged_dir, is_e3, composite_path}``. For the E3 composite
+    Returns ``{key, merged_dir, analysis_kind, is_e3, composite_path}``. For the E3 composite
     merged key, ``is_e3=True`` and ``composite_path`` points at the frozen
     composite so the caller can force the composite gate and read the algorithm
     set from the composite (not from a user stage string).
@@ -245,13 +269,25 @@ def resolve_analysis_target(index, key, *, root=".") -> dict:
     if CANONICAL_CONTRACT[key]["kind"] != "merged":
         raise ValueError(f"artifact {key!r} is not a merged analysis target")
     merged_dir = _resolve(entry["path"], root)
-    result = {"key": key, "merged_dir": str(merged_dir), "is_e3": key == E3_MERGED_KEY,
-              "composite_path": None}
+    result = {
+        "key": key,
+        "merged_dir": str(merged_dir),
+        "analysis_kind": CANONICAL_CONTRACT[key].get("analysis_kind"),
+        "is_e3": key == E3_MERGED_KEY,
+        "composite_path": None,
+        "source_manifest_path": None,
+    }
     if key == E3_MERGED_KEY:
         comp = next((a for a in index.get("artifacts", []) if a.get("key") == E3_COMPOSITE_KEY), None)
         if comp is None:
             raise ValueError(f"E3 composite key {E3_COMPOSITE_KEY!r} not in index")
         result["composite_path"] = str(_resolve(comp["path"], root))
+    manifest_key = _ANALYSIS_SOURCE_MANIFEST_KEYS.get(key)
+    if manifest_key:
+        manifest = next((a for a in index.get("artifacts", []) if a.get("key") == manifest_key), None)
+        if manifest is None:
+            raise ValueError(f"{key}: required source manifest {manifest_key!r} not in index")
+        result["source_manifest_path"] = str(_resolve(manifest["path"], root))
     return result
 
 

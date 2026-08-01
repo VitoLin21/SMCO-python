@@ -184,8 +184,23 @@ def _stub_primary_table(monkeypatch):
     return called
 
 
-def test_analyze_e1_statistics_does_not_require_composite(tmp_path, monkeypatch):
-    # E1 data (no baselines) via bare --merged-dir proceeds with selection_candidates.
+def test_analyze_confirmatory_e1_bare_merged_is_rejected(tmp_path, monkeypatch):
+    # Formal Task 12 cannot use an arbitrary E1 path either; every canonical
+    # input must pass through --canonical-index + --artifact-key.
+    import csv as _csv
+    ana = _load("scripts/analyze_smco_evo_highdim_paper.py")
+    merged = tmp_path / "merged"; merged.mkdir()
+    with open(merged / "valid_runs.csv", "w", newline="") as f:
+        w = _csv.DictWriter(f, fieldnames=["run_id", "algorithm_id", "stage"])
+        w.writeheader()
+        for i in range(3):
+            w.writerow({"run_id": f"r{i}", "algorithm_id": "PY-SP-SMCO-EVO",
+                        "stage": "e1_development"})
+    with pytest.raises(SystemExit):
+        ana.main(["--statistics", "--merged-dir", str(merged)])
+
+
+def test_analyze_development_bare_merged_remains_available(tmp_path, monkeypatch):
     import csv as _csv
     called = _stub_primary_table(monkeypatch)
     ana = _load("scripts/analyze_smco_evo_highdim_paper.py")
@@ -196,9 +211,9 @@ def test_analyze_e1_statistics_does_not_require_composite(tmp_path, monkeypatch)
         for i in range(3):
             w.writerow({"run_id": f"r{i}", "algorithm_id": "PY-SP-SMCO-EVO",
                         "stage": "e1_development"})
-    rc = ana.main(["--statistics", "--merged-dir", str(merged)])
+    rc = ana.main(["--statistics", "--development", "--merged-dir", str(merged)])
     assert rc == 0
-    assert called.get("ran")  # statistics ran, no composite gate
+    assert called.get("ran")
 
 
 def test_analyze_e3_runs_after_valid_gate_uses_composite_algos(tmp_path, monkeypatch):
@@ -210,7 +225,7 @@ def test_analyze_e3_runs_after_valid_gate_uses_composite_algos(tmp_path, monkeyp
     comp_path = tmp_path / "comp.json"
     comp_path.write_text(json.dumps(comp))
     final = _e3_final_merged(tmp_path, e2, bc)
-    rc = ana.main(["--statistics", "--merged-dir", str(final), "--composite", str(comp_path)])
+    rc = ana.main(["--statistics", "--development", "--merged-dir", str(final), "--composite", str(comp_path)])
     assert rc == 0
     md, algos = called["ran"]
     assert set(algos) == set(comp["algorithms"])  # 7 composite algorithms, not 18
@@ -232,9 +247,65 @@ def test_analyze_e3_via_canonical_index(tmp_path, monkeypatch):
     monkeypatch.setattr(ca, "validate_canonical_index", lambda index, **k: [])
     monkeypatch.setattr(ca, "resolve_analysis_target",
                         lambda index, key, **k: {"key": key, "merged_dir": str(final),
-                                                 "is_e3": True, "composite_path": str(comp_path)})
+                                                 "analysis_kind": "comparative", "is_e3": True,
+                                                 "composite_path": str(comp_path)})
     rc = ana.main(["--statistics", "--canonical-index", str(idx_path),
                    "--artifact-key", "e3_composite_merged"])
     assert rc == 0
     _, algos = called["ran"]
     assert set(algos) == set(comp["algorithms"])
+
+
+def test_analyze_e1_via_canonical_index_uses_18_candidates(tmp_path, monkeypatch):
+    import smco.canonical_artifacts as ca
+    called = _stub_primary_table(monkeypatch)
+    ana = _load("scripts/analyze_smco_evo_highdim_paper.py")
+    idx_path = tmp_path / "index.json"; idx_path.write_text("{}")
+    merged = tmp_path / "merged"; merged.mkdir()
+    monkeypatch.setattr(ca, "validate_canonical_index", lambda index, **k: [])
+    monkeypatch.setattr(ca, "resolve_analysis_target", lambda index, key, **k: {
+        "key": "e1_merged", "merged_dir": str(merged), "analysis_kind": "selection_matrix",
+        "is_e3": False, "composite_path": None, "source_manifest_path": None,
+    })
+    assert ana.main(["--statistics", "--canonical-index", str(idx_path),
+                     "--artifact-key", "e1_merged"]) == 0
+    assert len(called["ran"][1]) == 18
+
+
+def test_analyze_e2_via_canonical_index_uses_frozen_two_algorithms(tmp_path, monkeypatch):
+    import csv as _csv
+    import smco.canonical_artifacts as ca
+    called = _stub_primary_table(monkeypatch)
+    ana = _load("scripts/analyze_smco_evo_highdim_paper.py")
+    idx_path = tmp_path / "index.json"; idx_path.write_text("{}")
+    merged = tmp_path / "merged"; merged.mkdir()
+    with open(merged / "valid_runs.csv", "w", newline="") as f:
+        w = _csv.DictWriter(f, fieldnames=["algorithm_id"]); w.writeheader()
+        w.writerow({"algorithm_id": "WIN"}); w.writerow({"algorithm_id": "BASE"})
+    manifest = tmp_path / "e2_manifest.json"
+    manifest.write_text(json.dumps({"winner_algorithm": "WIN", "matched_base_algorithm": "BASE"}))
+    monkeypatch.setattr(ca, "validate_canonical_index", lambda index, **k: [])
+    monkeypatch.setattr(ca, "resolve_analysis_target", lambda index, key, **k: {
+        "key": "e2_merged", "merged_dir": str(merged), "analysis_kind": "winner_vs_base",
+        "is_e3": False, "composite_path": None, "source_manifest_path": str(manifest),
+    })
+    assert ana.main(["--statistics", "--canonical-index", str(idx_path),
+                     "--artifact-key", "e2_merged"]) == 0
+    assert called["ran"][1] == ["WIN", "BASE"]
+
+
+@pytest.mark.parametrize("key,kind", [
+    ("e6_strategy_merged", "strategy_ablation"),
+    ("e6_start_count_merged", "start_count_ablation"),
+])
+def test_analyze_e6_canonical_artifact_requires_dedicated_analysis(tmp_path, monkeypatch, key, kind):
+    import smco.canonical_artifacts as ca
+    ana = _load("scripts/analyze_smco_evo_highdim_paper.py")
+    idx_path = tmp_path / "index.json"; idx_path.write_text("{}")
+    monkeypatch.setattr(ca, "validate_canonical_index", lambda index, **k: [])
+    monkeypatch.setattr(ca, "resolve_analysis_target", lambda index, artifact_key, **k: {
+        "key": key, "merged_dir": str(tmp_path), "analysis_kind": kind,
+        "is_e3": False, "composite_path": None, "source_manifest_path": None,
+    })
+    with pytest.raises(SystemExit):
+        ana.main(["--statistics", "--canonical-index", str(idx_path), "--artifact-key", key])

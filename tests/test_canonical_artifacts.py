@@ -185,6 +185,38 @@ def test_index_development_only_does_not_require_audit(tmp_path):
     assert validate_canonical_index(index, contract=_test_contract()) == []
 
 
+def test_index_rejects_missing_canonical_file_hash_after_refreeze(tmp_path):
+    # A new index_sha256 cannot legitimize an unhashed canonical file.
+    index, _ = _build_valid_index(tmp_path)
+    entry = next(a for a in index["artifacts"] if a["key"] == "e2_manifest")
+    entry.pop("sha256")
+    index["index_sha256"] = index_sha256(index)
+    errs = validate_canonical_index(index, contract=_test_contract())
+    assert any("e2_manifest" in e and "sha256" in e for e in errs)
+
+
+def test_index_rejects_missing_canonical_merged_hashes_after_refreeze(tmp_path):
+    # Both physical files must remain bound; merely re-freezing the index is not
+    # enough when either hash field is removed.
+    index, _ = _build_valid_index(tmp_path)
+    entry = next(a for a in index["artifacts"] if a["key"] == "e2_merged")
+    entry.pop("valid_runs_sha256")
+    entry.pop("audit_sha256")
+    index["index_sha256"] = index_sha256(index)
+    errs = validate_canonical_index(index, contract=_test_contract())
+    assert any("e2_merged" in e and "valid_runs_sha256" in e for e in errs)
+    assert any("e2_merged" in e and "audit_sha256" in e for e in errs)
+
+
+def test_index_rejects_invalid_canonical_file_hash_after_refreeze(tmp_path):
+    index, _ = _build_valid_index(tmp_path)
+    entry = next(a for a in index["artifacts"] if a["key"] == "e3_composite")
+    entry["sha256"] = "not-a-sha256"
+    index["index_sha256"] = index_sha256(index)
+    errs = validate_canonical_index(index, contract=_test_contract())
+    assert any("e3_composite" in e and "sha256" in e for e in errs)
+
+
 def test_resolve_analysis_target_e3_returns_composite_path(tmp_path):
     index, _ = _build_valid_index(tmp_path)
     target = resolve_analysis_target(index, E3_MERGED_KEY)
@@ -198,6 +230,14 @@ def test_resolve_analysis_target_non_e3(tmp_path):
     target = resolve_analysis_target(index, "e2_merged")
     assert target["is_e3"] is False
     assert target["composite_path"] is None
+
+
+def test_production_analysis_kinds_are_contract_controlled():
+    assert CANONICAL_CONTRACT["e1_merged"]["analysis_kind"] == "selection_matrix"
+    assert CANONICAL_CONTRACT["e2_merged"]["analysis_kind"] == "winner_vs_base"
+    assert CANONICAL_CONTRACT[E3_MERGED_KEY]["analysis_kind"] == "comparative"
+    assert CANONICAL_CONTRACT["e6_strategy_merged"]["analysis_kind"] == "strategy_ablation"
+    assert CANONICAL_CONTRACT["e6_start_count_merged"]["analysis_kind"] == "start_count_ablation"
 
 
 def test_resolve_analysis_target_rejects_unknown_key(tmp_path):
