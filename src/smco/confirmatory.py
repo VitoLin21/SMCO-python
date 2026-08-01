@@ -11,6 +11,8 @@ only execute tasks listed in the manifest, and report completed/missing counts.
 
 from __future__ import annotations
 
+import csv
+import hashlib
 import json
 from pathlib import Path
 
@@ -390,9 +392,144 @@ def build_baseline_component_manifest(
     return freeze_manifest(manifest)
 
 
+# --- P1c composite: build + validate (constraints 1-3) ---
+
+_EXPECTED_E3_ALGORITHMS = frozenset({
+    "PY-SP-SMCO-EVO", "PY-BASE-SMCO",
+    "DE", "GA", "PSO", "SA", "GenSA",
+})
+
+
+def _file_sha256(path) -> str:
+    """SHA-256 of a file's raw bytes (for content-hash binding)."""
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _run_ids_from_csv(path) -> set:
+    """Read the run_id column from a merged valid_runs.csv."""
+    with open(path, newline="") as f:
+        return {row["run_id"] for row in csv.DictReader(f)}
+
+
+def _run_id_set_sha256(run_ids) -> str:
+    """SHA-256 of the sorted run_id set (order-independent)."""
+    return hashlib.sha256(json.dumps(sorted(run_ids)).encode()).hexdigest()
+
+
+def build_comparative_composite(*, e2_manifest_path, e2_merged_dir,
+                                baseline_component_path, baseline_merged_dir) -> dict:
+    """P1c: build a frozen comparative composite referencing E2 winner/base +
+    E3 baseline component. Auto-derives algorithm set (constraint 2), checks
+    selection_hash consistency (constraint 3), and binds content hashes
+    (constraint 1). Does NOT modify E2 fields.
+    """
+    e2m = json.loads(Path(e2_manifest_path).read_text())
+    bcm = json.loads(Path(baseline_component_path).read_text())
+    # constraint 2: auto-derive algorithms from manifests (no CLI param)
+    e2_algos = {e2m["winner_algorithm"], e2m["matched_base_algorithm"]}
+    bl_algos = set(bcm["baseline_algorithms"])
+    algos = e2_algos | bl_algos
+    if algos != _EXPECTED_E3_ALGORITHMS:
+        raise ValueError(
+            f"composite algorithms {sorted(algos)} != expected "
+            f"{sorted(_EXPECTED_E3_ALGORITHMS)}")
+    # constraint 3: selection_hash must be consistent
+    e2_sel = e2m.get("selection_hash")
+    bc_sel = bcm.get("selection_hash")
+    if not e2_sel or e2_sel != bc_sel:
+        raise ValueError(
+            f"selection_hash mismatch: E2={e2_sel!r} baseline={bc_sel!r}")
+    # constraint 1: content hash binding (valid_runs + audit + run_id set)
+    e2_vr = Path(e2_merged_dir) / "valid_runs.csv"
+    e2_au = Path(e2_merged_dir) / "provenance_audit.json"
+    bc_vr = Path(baseline_merged_dir) / "valid_runs.csv"
+    bc_au = Path(baseline_merged_dir) / "provenance_audit.json"
+    e2_rids = _run_ids_from_csv(e2_vr)
+    bc_rids = _run_ids_from_csv(bc_vr)
+    if e2_rids & bc_rids:
+        raise ValueError(
+            f"run_id overlap between E2 and baseline: {sorted(e2_rids & bc_rids)[:5]}")
+    e2_audit = json.loads(e2_au.read_text())
+    bc_audit = json.loads(bc_au.read_text())
+    composite = {
+        "composite_type": "comparative_composite",
+        "components": {
+            "winner_base": {
+                "manifest_path": str(e2_manifest_path),
+                "manifest_sha256": e2m["manifest_sha256"],
+                "merged_dir": str(e2_merged_dir),
+                "valid_runs_sha256": _file_sha256(e2_vr),
+                "audit_sha256": _file_sha256(e2_au),
+                "run_id_set_sha256": _run_id_set_sha256(e2_rids),
+                "audit_passed": e2_audit.get("passed") is True,
+                "n_runs": len(e2_rids),
+                "stage": e2m["stage"],
+                "selection_hash": e2_sel,
+                "algorithms": sorted(e2_algos),
+            },
+            "baseline_extension": {
+                "manifest_path": str(baseline_component_path),
+                "manifest_sha256": bcm["manifest_sha256"],
+                "merged_dir": str(baseline_merged_dir),
+                "valid_runs_sha256": _file_sha256(bc_vr),
+                "audit_sha256": _file_sha256(bc_au),
+                "run_id_set_sha256": _run_id_set_sha256(bc_rids),
+                "audit_passed": bc_audit.get("passed") is True,
+                "n_runs": len(bc_rids),
+                "stage": bcm["stage"],
+                "component_role": bcm.get("component_role"),
+                "selection_hash": bc_sel,
+                "algorithms": sorted(bl_algos),
+            },
+        },
+        "algorithms": sorted(algos),
+        "total_runs": len(e2_rids) + len(bc_rids),
+    }
+    composite["frozen"] = True
+    composite["composite_sha256"] = hashlib.sha256(
+        json.dumps(composite, sort_keys=True).encode()).hexdigest()
+    return composite
+
+
+def validate_composite(composite, *, e2_merged_dir, baseline_merged_dir) -> list:
+    """P1c: validate a comparative composite by recomputing content hashes
+    (constraint 1) and checking all structural constraints. Returns [] on pass.
+    """
+    errors: list[str] = []
+    for key, mdir in [("winner_base", e2_merged_dir),
+                      ("baseline_extension", baseline_merged_dir)]:
+        comp = composite["components"][key]
+        vr = Path(mdir) / "valid_runs.csv"
+        au = Path(mdir) / "provenance_audit.json"
+        if _file_sha256(vr) != comp["valid_runs_sha256"]:
+            errors.append(f"{key} valid_runs.csv hash mismatch (source modified after freeze)")
+        if _file_sha256(au) != comp["audit_sha256"]:
+            errors.append(f"{key} audit.json hash mismatch")
+        rids = _run_ids_from_csv(vr)
+        if _run_id_set_sha256(rids) != comp["run_id_set_sha256"]:
+            errors.append(f"{key} run_id set hash mismatch")
+        if not comp["audit_passed"]:
+            errors.append(f"{key} audit not passed")
+    e2_rids = _run_ids_from_csv(Path(e2_merged_dir) / "valid_runs.csv")
+    bc_rids = _run_ids_from_csv(Path(baseline_merged_dir) / "valid_runs.csv")
+    if e2_rids & bc_rids:
+        errors.append(f"run_id overlap: {sorted(e2_rids & bc_rids)[:5]}")
+    if set(composite["algorithms"]) != _EXPECTED_E3_ALGORITHMS:
+        errors.append(f"algorithms {composite['algorithms']} != expected")
+    e2_sel = composite["components"]["winner_base"]["selection_hash"]
+    bc_sel = composite["components"]["baseline_extension"]["selection_hash"]
+    if e2_sel != bc_sel:
+        errors.append("selection_hash mismatch between components")
+    if composite["total_runs"] != len(e2_rids) + len(bc_rids):
+        errors.append("total_runs mismatch")
+    return errors
+
+
 __all__ = [
     "is_run_complete",
     "build_baseline_component_manifest",
+    "build_comparative_composite",
+    "validate_composite",
     "plan_batch",
     "build_confirmatory_manifest",
     "confirmatory_errors",

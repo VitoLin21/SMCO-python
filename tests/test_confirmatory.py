@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from smco.confirmatory import (
     build_baseline_component_manifest,
+    build_comparative_composite,
     build_confirmatory_manifest,
     confirmatory_errors,
     enforce_confirmatory,
     is_run_complete,
     plan_batch,
+    validate_composite,
 )
 from smco.experiment_manifests import (
     build_algorithm_config,
@@ -260,6 +264,65 @@ def test_component_gate_f_conditional_skip():
     manifest["manifest_sha256"] = manifest_sha256(manifest)
     errors = confirmatory_errors(manifest, selection=sel)
     assert any("selection_hash" in e or "winner" in e for e in errors)
+
+
+def _write_mock_merged(tmp, run_ids, passed=True):
+    import csv
+    d = tmp / "merged"; d.mkdir(parents=True, exist_ok=True)
+    with open(d / "valid_runs.csv", "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=["run_id"]); w.writeheader()
+        for r in run_ids: w.writerow({"run_id": r})
+    (d / "provenance_audit.json").write_text(
+        json.dumps({"passed": passed, "checks": [], "n_rows": len(run_ids)}))
+    return d
+
+
+def test_composite_passes_and_rejects_modified_source(tmp_path):
+    """P1c constraints 1-3: composite validates dual audit + content hash +
+    selection_hash; modifying valid_runs.csv after freeze → hash mismatch."""
+    import json as _json
+    e2_m = {"manifest_sha256": "abc", "stage": "e2_factorial_highdim",
+            "winner_algorithm": "PY-SP-SMCO-EVO",
+            "matched_base_algorithm": "PY-BASE-SMCO", "selection_hash": "sh1"}
+    bc_m = {"manifest_sha256": "def", "stage": "e3_companion_baselines",
+            "baseline_algorithms": ["DE", "GA", "PSO", "SA", "GenSA"],
+            "selection_hash": "sh1", "component_role": "baseline_extension"}
+    (tmp_path / "e2m.json").write_text(_json.dumps(e2_m))
+    (tmp_path / "bcm.json").write_text(_json.dumps(bc_m))
+    e2_dir = _write_mock_merged(tmp_path / "e2", [f"e2_{i}" for i in range(5)])
+    bc_dir = _write_mock_merged(tmp_path / "bc", [f"bc_{i}" for i in range(5)])
+    composite = build_comparative_composite(
+        e2_manifest_path=str(tmp_path / "e2m.json"), e2_merged_dir=str(e2_dir),
+        baseline_component_path=str(tmp_path / "bcm.json"), baseline_merged_dir=str(bc_dir))
+    assert composite["total_runs"] == 10
+    assert len(composite["algorithms"]) == 7
+    assert validate_composite(composite, e2_merged_dir=str(e2_dir),
+                              baseline_merged_dir=str(bc_dir)) == []
+    # constraint 1: modify source valid_runs.csv → hash mismatch
+    with open(e2_dir / "valid_runs.csv", "a") as f:
+        f.write("tampered\n")
+    errors = validate_composite(composite, e2_merged_dir=str(e2_dir),
+                                baseline_merged_dir=str(bc_dir))
+    assert any("hash mismatch" in e for e in errors)
+
+
+def test_composite_rejects_selection_hash_mismatch(tmp_path):
+    """P1c constraint 3: E2 vs baseline selection_hash mismatch → ValueError."""
+    import json as _json
+    e2_m = {"manifest_sha256": "abc", "stage": "e2_factorial_highdim",
+            "winner_algorithm": "PY-SP-SMCO-EVO",
+            "matched_base_algorithm": "PY-BASE-SMCO", "selection_hash": "sh1"}
+    bc_m = {"manifest_sha256": "def", "stage": "e3_companion_baselines",
+            "baseline_algorithms": ["DE", "GA", "PSO", "SA", "GenSA"],
+            "selection_hash": "DIFFERENT", "component_role": "baseline_extension"}
+    (tmp_path / "e2m.json").write_text(_json.dumps(e2_m))
+    (tmp_path / "bcm.json").write_text(_json.dumps(bc_m))
+    e2_dir = _write_mock_merged(tmp_path / "e2", ["e2_0"])
+    bc_dir = _write_mock_merged(tmp_path / "bc", ["bc_0"])
+    with pytest.raises(ValueError, match="selection_hash"):
+        build_comparative_composite(
+            e2_manifest_path=str(tmp_path / "e2m.json"), e2_merged_dir=str(e2_dir),
+            baseline_component_path=str(tmp_path / "bcm.json"), baseline_merged_dir=str(bc_dir))
 
 
 def test_build_confirmatory_manifest_carries_closure_fields():
