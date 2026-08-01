@@ -7,6 +7,7 @@ import json
 import pytest
 
 from smco.confirmatory import (
+    baseline_component_errors,
     build_baseline_component_manifest,
     build_comparative_composite,
     build_confirmatory_manifest,
@@ -253,10 +254,7 @@ def test_component_gate_f_conditional_skip():
     without winner_config_hash; one missing a structural constraint does not."""
     sel = _selection()
     # valid component — no winner_config_hash, no winner in tasks → must pass
-    manifest = build_baseline_component_manifest(
-        sel, functions=["Rastrigin"], dims=[200], n_instances=1,
-        fe_budget_per_d=1000, checkpoints_per_d=(1000,),
-    )
+    manifest = _build_full_baseline_component(sel_hash=sel["selection_hash"])
     assert confirmatory_errors(manifest, selection=sel) == []
     # tamper: remove selection_hash → no longer a valid component → must fail
     # (treated as ordinary manifest missing winner checks)
@@ -264,6 +262,161 @@ def test_component_gate_f_conditional_skip():
     manifest["manifest_sha256"] = manifest_sha256(manifest)
     errors = confirmatory_errors(manifest, selection=sel)
     assert any("selection_hash" in e or "winner" in e for e in errors)
+
+
+# --- P1c strict: baseline_component_errors (review §4.3) ---
+# The canonical E3 baseline component is exactly 5 baselines x 4 functions x
+# 3 dims x 5 confirmatory instances = 300 tasks. A component claiming
+# component_role="baseline_extension" must satisfy the full 14-check contract;
+# a partial/tampered matrix must NOT bypass Gate-F.
+
+_E3_FUNCTIONS = ("Rastrigin", "Ackley", "Griewank", "Zakharov")
+_E3_DIMS = (200, 500, 1000)
+_E3_BASELINES = ("DE", "GA", "PSO", "SA", "GenSA")
+
+
+def _confirmatory_instance_index(functions=_E3_FUNCTIONS, dims=_E3_DIMS,
+                                 n_instances=5, stage="confirmatory"):
+    """A confirmatory-stage instance index mirroring the production artifact."""
+    idx = {}
+    for fn in functions:
+        for d in dims:
+            for i in range(n_instances):
+                idx[(fn, int(d), i)] = {
+                    "function": fn, "dimension": int(d), "instance_id": i,
+                    "stage": stage,
+                    "artifact_dir": f"instances/{stage}_{fn}_d{int(d)}_i{i}",
+                    "transform_sha256": f"th_{fn}_{d}_{i}",
+                    "start_points_hash": f"sph_{fn}_{d}_{i}",
+                }
+    return idx
+
+
+def _build_full_baseline_component(sel_hash="bcf87965006220a0", stage="confirmatory"):
+    return build_baseline_component_manifest(
+        _selection(sel_hash=sel_hash),
+        functions=list(_E3_FUNCTIONS), dims=list(_E3_DIMS), n_instances=5,
+        fe_budget_per_d=1000, checkpoints_per_d=(1000,),
+        instance_index=_confirmatory_instance_index(stage=stage),
+    )
+
+
+def test_baseline_component_full_300_passes():
+    manifest = _build_full_baseline_component()
+    assert len(manifest["tasks"]) == 300
+    assert baseline_component_errors(manifest) == []
+    # also reachable via confirmatory_errors (Gate-F), with the selection
+    assert confirmatory_errors(
+        manifest, selection=_selection(sel_hash="bcf87965006220a0")) == []
+
+
+def test_baseline_component_rejects_wrong_selection_hash():
+    manifest = _build_full_baseline_component()
+    errors = baseline_component_errors(manifest, selection={"selection_hash": "WRONG"})
+    assert any("selection_hash" in e for e in errors)
+
+
+def test_baseline_component_rejects_missing_task():
+    manifest = _build_full_baseline_component()
+    manifest["tasks"].pop()  # 299 tasks
+    manifest["manifest_sha256"] = manifest_sha256(manifest)
+    errors = baseline_component_errors(manifest)
+    assert errors and any("300" in e for e in errors)
+
+
+def test_baseline_component_rejects_duplicated_combo_keeps_300():
+    # review §4.3: copy one task, keep total at 300 → duplicate combo must fail.
+    import copy
+    manifest = _build_full_baseline_component()
+    tasks = manifest["tasks"]
+    tasks.pop(0)                       # drop one combo (299)
+    tasks.append(copy.deepcopy(tasks[0]))  # duplicate another (300 again)
+    manifest["manifest_sha256"] = manifest_sha256(manifest)
+    errors = baseline_component_errors(manifest)
+    assert errors  # duplicate combo / distinct run_id count != 300
+
+
+def test_baseline_component_rejects_small_grid():
+    # a 5-task (1 func x 1 dim x 1 inst x 5 baselines) component is NOT canonical
+    manifest = build_baseline_component_manifest(
+        _selection(), functions=["Rastrigin"], dims=[200], n_instances=1,
+        fe_budget_per_d=1000, checkpoints_per_d=(1000,),
+        instance_index=_confirmatory_instance_index(
+            functions=["Rastrigin"], dims=[200], n_instances=1),
+    )
+    errors = baseline_component_errors(manifest)
+    assert errors and any("300" in e for e in errors)
+
+
+def test_baseline_component_rejects_wrong_function():
+    manifest = _build_full_baseline_component()
+    manifest["tasks"][0]["function"] = "Sphere"  # not in the 4-function set
+    manifest["manifest_sha256"] = manifest_sha256(manifest)
+    errors = baseline_component_errors(manifest)
+    assert any("function" in e.lower() for e in errors)
+
+
+def test_baseline_component_rejects_wrong_dimension():
+    manifest = _build_full_baseline_component()
+    manifest["tasks"][0]["dimension"] = 777  # not in {200,500,1000}
+    manifest["manifest_sha256"] = manifest_sha256(manifest)
+    errors = baseline_component_errors(manifest)
+    assert any("dimension" in e.lower() for e in errors)
+
+
+def test_baseline_component_rejects_wrong_instance():
+    manifest = _build_full_baseline_component()
+    manifest["tasks"][0]["instance"] = 9  # not in {0,1,2,3,4}
+    manifest["manifest_sha256"] = manifest_sha256(manifest)
+    errors = baseline_component_errors(manifest)
+    assert any("instance" in e.lower() for e in errors)
+
+
+def test_baseline_component_rejects_wrong_baseline():
+    manifest = _build_full_baseline_component()
+    manifest["tasks"][0]["algorithm"] = "CMA-ES"  # not one of the 5 baselines
+    manifest["manifest_sha256"] = manifest_sha256(manifest)
+    errors = baseline_component_errors(manifest)
+    assert any("algorithm" in e.lower() for e in errors)
+
+
+def test_baseline_component_rejects_development_instances():
+    # a component built from a development instance index → artifact dirs are
+    # development_*, not confirmatory_* → must fail (review §4.2 check 12).
+    manifest = _build_full_baseline_component(stage="development")
+    errors = baseline_component_errors(manifest)
+    assert any("confirmatory" in e for e in errors)
+
+
+def test_baseline_component_rejects_development_index_when_passed():
+    # review §4.2 check 13: when an instance_index is supplied, every entry's
+    # stage must be 'confirmatory'.
+    manifest = _build_full_baseline_component(stage="confirmatory")
+    dev_index = _confirmatory_instance_index(stage="development")
+    errors = baseline_component_errors(manifest, instance_index=dev_index)
+    assert any("confirmatory" in e for e in errors)
+
+
+def test_baseline_component_rejects_winner_base_algorithm():
+    # review §4.2 check 14: a winner/base SMCO algorithm must not appear.
+    manifest = _build_full_baseline_component()
+    manifest["tasks"][0]["algorithm"] = "PY-SP-SMCO-EVO"
+    manifest["manifest_sha256"] = manifest_sha256(manifest)
+    errors = baseline_component_errors(manifest)
+    assert any("winner" in e or "base" in e.lower() for e in errors)
+
+
+def test_baseline_component_role_alone_cannot_bypass_gate_f():
+    # review §3.2 / §4.3: component_role + metadata present, but the task matrix
+    # is empty/bogus → confirmatory_errors must still fail (cannot bypass Gate-F).
+    manifest = freeze_manifest(
+        build_manifest("e3_companion_baselines", "synthetic_highdim", []))
+    manifest["component_role"] = "baseline_extension"
+    manifest["baseline_algorithms"] = list(_E3_BASELINES)
+    manifest["selection_hash"] = "s1"
+    manifest["manifest_sha256"] = manifest_sha256(manifest)
+    errors = confirmatory_errors(manifest, selection={"selection_hash": "s1"})
+    assert errors  # empty task matrix rejected — Gate-F not bypassed
 
 
 def _write_mock_merged(tmp, run_ids, passed=True):

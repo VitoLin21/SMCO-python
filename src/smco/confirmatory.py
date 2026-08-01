@@ -156,8 +156,164 @@ def _is_baseline_extension(manifest: dict) -> bool:
     )
 
 
+def baseline_component_errors(
+    manifest: dict, *, selection: dict | None = None, instance_index: dict | None = None,
+) -> list[str]:
+    """Strict E3 baseline-component contract (review §4.2).
+
+    Returns Gate-F violations for a frozen ``baseline_extension`` component.
+    An empty list means the manifest is the exact canonical E3 baseline
+    component: the 5 baselines x {Rastrigin, Ackley, Griewank, Zakharov} x
+    {200, 500, 1000} x 5 confirmatory instances = 300 tasks, each
+    (algorithm, function, dimension, instance) exactly once, no winner/base
+    algorithm, every instance confirmatory-stage.
+
+    Called by :func:`confirmatory_errors` for any manifest that declares
+    ``component_role="baseline_extension"`` (so ``component_role`` alone cannot
+    bypass Gate-F — the full task matrix must match). Also reusable directly by
+    the composite builder (review §5.3) and the generation CLI (review §6.2).
+    """
+    errors: list[str] = []
+    expected_baselines = set(_BASELINE_EXTENSION_BASELINES)
+    expected_functions = {"Rastrigin", "Ackley", "Griewank", "Zakharov"}
+    expected_dims = {200, 500, 1000}
+    expected_instances = {0, 1, 2, 3, 4}
+
+    # 1. frozen + recomputed content hash
+    if not manifest.get("frozen"):
+        errors.append("baseline component is not frozen")
+    stored = manifest.get("manifest_sha256")
+    if stored is None:
+        errors.append("baseline component missing manifest_sha256")
+    elif manifest_sha256(manifest) != stored:
+        errors.append("baseline component manifest_sha256 mismatch (modified after freeze)")
+
+    # 2. component_role
+    if manifest.get("component_role") != "baseline_extension":
+        errors.append(
+            f"component_role {manifest.get('component_role')!r} != 'baseline_extension'")
+
+    # 3. stage
+    if manifest.get("stage") != _BASELINE_EXTENSION_STAGE:
+        errors.append(f"stage {manifest.get('stage')!r} != {_BASELINE_EXTENSION_STAGE!r}")
+
+    # 4. suite
+    if manifest.get("suite") != _BASELINE_EXTENSION_SUITE:
+        errors.append(f"suite {manifest.get('suite')!r} != {_BASELINE_EXTENSION_SUITE!r}")
+
+    # 5. selection_hash (non-empty; must match a passed selection's hash)
+    sel_hash = manifest.get("selection_hash")
+    if not sel_hash:
+        errors.append("baseline component missing selection_hash")
+    if selection is not None:
+        passed_hash = selection.get("selection_hash")
+        if passed_hash and sel_hash and passed_hash != sel_hash:
+            errors.append(
+                f"selection_hash mismatch: manifest={sel_hash!r} selection={passed_hash!r}")
+
+    tasks = manifest.get("tasks") or []
+    task_algos = {t.get("algorithm_id") or t.get("algorithm") for t in tasks}
+
+    # 6. baseline set — metadata AND the actual task algorithm set
+    meta_baselines = set(manifest.get("baseline_algorithms", []))
+    if meta_baselines != expected_baselines:
+        errors.append(
+            f"baseline_algorithms {sorted(meta_baselines)} != expected "
+            f"{sorted(expected_baselines)}")
+    if tasks and task_algos != expected_baselines:
+        errors.append(
+            f"task algorithm set {sorted(task_algos)} != expected "
+            f"{sorted(expected_baselines)}")
+
+    # 7. function set
+    functions = {t.get("function") for t in tasks}
+    if functions != expected_functions:
+        errors.append(
+            f"function set {sorted(functions)} != expected {sorted(expected_functions)}")
+
+    # 8. dimension set
+    dims = {int(t["dimension"]) for t in tasks if t.get("dimension") is not None}
+    if dims != expected_dims:
+        errors.append(f"dimension set {sorted(dims)} != expected {sorted(expected_dims)}")
+
+    # 9. instance set
+    instances = {int(t["instance"]) for t in tasks if t.get("instance") is not None}
+    if instances != expected_instances:
+        errors.append(f"instance set {sorted(instances)} != expected {sorted(expected_instances)}")
+
+    # 10. each (algorithm, function, dimension, instance) exactly once
+    seen: dict[tuple, int] = {}
+    duplicates: list[tuple] = []
+    for t in tasks:
+        key = (
+            t.get("algorithm_id") or t.get("algorithm"),
+            t.get("function"),
+            int(t["dimension"]) if t.get("dimension") is not None else None,
+            int(t["instance"]) if t.get("instance") is not None else None,
+        )
+        seen[key] = seen.get(key, 0) + 1
+        if seen[key] == 2:
+            duplicates.append(key)
+    if duplicates:
+        errors.append(
+            f"{len(duplicates)} duplicate (algorithm,function,dimension,instance) task(s); "
+            f"each combination must appear exactly once (e.g. {duplicates[:3]})")
+
+    # 11. exactly 300 tasks and 300 distinct run_ids
+    run_ids = [t.get("run_id") for t in tasks]
+    distinct_run_ids = len({r for r in run_ids if r is not None})
+    if len(tasks) != 300:
+        errors.append(f"baseline component has {len(tasks)} tasks, expected exactly 300")
+    if distinct_run_ids != 300:
+        errors.append(
+            f"baseline component has {distinct_run_ids} distinct run_ids, expected exactly 300")
+
+    # 12. every instance_artifact_dir must point at a confirmatory instance
+    non_conf = sorted({
+        t.get("instance_artifact_dir") for t in tasks
+        if not (t.get("instance_artifact_dir")
+                and "confirmatory_" in t.get("instance_artifact_dir"))
+    })
+    if non_conf:
+        errors.append(
+            f"{len(non_conf)} task(s) with non-confirmatory instance_artifact_dir "
+            f"(expected 'instances/confirmatory_*'); e.g. {non_conf[:3]}")
+
+    # 13. if an instance index is supplied, every entry must be confirmatory-stage
+    if instance_index is not None:
+        bad_idx = [
+            (k, e.get("stage")) for k, e in instance_index.items()
+            if e.get("stage") != "confirmatory"
+        ]
+        if bad_idx:
+            errors.append(
+                f"instance_index has {len(bad_idx)} non-confirmatory entry/entries "
+                f"(stage != 'confirmatory'); e.g. {bad_idx[:3]}")
+
+    # 14. no winner/base (SMCO-family) algorithm may appear
+    forbidden = {a for a in task_algos if a and ("SMCO" in a or "-BASE-" in a)}
+    if selection is not None:
+        winner = selection.get("winner")
+        if winner:
+            forbidden |= {a for a in task_algos if a == winner}
+    if forbidden:
+        errors.append(
+            f"baseline component contains winner/base algorithm(s) {sorted(forbidden)}; "
+            f"only the 5 baselines are allowed")
+
+    return errors
+
+
 def confirmatory_errors(manifest: dict, *, selection: dict | None = None) -> list[str]:
     """Return Gate-F violations for a confirmatory manifest (empty == ok)."""
+    # P1c (review §4): a baseline_extension component is validated by the exact
+    # 300-task contract, NOT by the winner-present checks below. Only a component
+    # that passes baseline_component_errors() skips the winner closure — any
+    # structural gap (wrong selection, missing/duplicated tasks, development
+    # instances, winner/base leak) fails Gate-F here. component_role alone never
+    # bypasses Gate-F, because the full task matrix is checked.
+    if _is_baseline_extension(manifest):
+        return baseline_component_errors(manifest, selection=selection)
     errors: list[str] = []
     if not manifest.get("frozen"):
         errors.append("manifest is not frozen")
@@ -169,23 +325,17 @@ def confirmatory_errors(manifest: dict, *, selection: dict | None = None) -> lis
     tasks = manifest.get("tasks", [])
     # A-03: selection-driven closure — every task algorithm must be in the
     # frozen allowed set, and the winner's configuration_hash must be present.
-    # P1c constraint 3: a valid baseline_extension component (stage/suite/
-    # baselines/selection_hash all correct) intentionally has no winner — skip
-    # winner-present checks. Any other manifest (including one that claims
-    # component_role but misses a structural constraint) is checked normally.
-    is_component = _is_baseline_extension(manifest)
     allowed = manifest.get("allowed_algorithms")
     if allowed is not None:
         task_algos = {t.get("algorithm_id") or t.get("algorithm") for t in tasks}
         extra = sorted(task_algos - set(allowed))
         if extra:
             errors.append(f"manifest has algorithms outside the allowed set: {extra}")
-    if not is_component:
-        winner_hash = manifest.get("winner_config_hash")
-        if winner_hash and winner_hash != NONE_TOKEN:
-            if not any(t.get("configuration_hash") == winner_hash for t in tasks):
-                errors.append("winner_config_hash not present in any manifest task")
-    if selection is not None and not is_component:
+    winner_hash = manifest.get("winner_config_hash")
+    if winner_hash and winner_hash != NONE_TOKEN:
+        if not any(t.get("configuration_hash") == winner_hash for t in tasks):
+            errors.append("winner_config_hash not present in any manifest task")
+    if selection is not None:
         winner = selection.get("winner")
         if not winner:
             errors.append("selection has no winner")
@@ -527,6 +677,7 @@ def validate_composite(composite, *, e2_merged_dir, baseline_merged_dir) -> list
 
 __all__ = [
     "is_run_complete",
+    "baseline_component_errors",
     "build_baseline_component_manifest",
     "build_comparative_composite",
     "validate_composite",
