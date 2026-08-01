@@ -127,74 +127,114 @@ def test_generate_e3_composite_rejects_bad_sources(tmp_path):
         ])
 
 
-# --- analysis: E3 --statistics requires --composite and a valid gate ---
+# --- analysis: E3 --statistics resolves via canonical index / composite gate (review P0) ---
 
-def test_analyze_e3_statistics_requires_composite(tmp_path):
+def _e3_final_merged(tmp_path, e2, bc, **kw):
+    from test_confirmatory import _write_final_merged
+    return _write_final_merged(tmp_path / "final", e2, bc, **kw)
+
+
+def test_analyze_default_stage_e3_merged_is_rejected(tmp_path):
+    # review P0 regression: default stage + an E3 merged dir + NO composite must
+    # still be rejected (the gate cannot be bypassed by omitting --stage/--composite).
     ana = _load("scripts/analyze_smco_evo_highdim_paper.py")
-    merged = tmp_path / "merged"; merged.mkdir()
+    comp, *_, e2, bc = _build_valid_composite(tmp_path)
+    final = _e3_final_merged(tmp_path, e2, bc)  # contains DE/GA/PSO/SA/GenSA
     with pytest.raises(SystemExit):
-        ana.main(["--stage", "e3-comparative-analysis", "--statistics",
-                  "--merged-dir", str(merged)])
+        ana.main(["--statistics", "--merged-dir", str(final)])  # default stage, no composite
 
 
-def test_analyze_e3_statistics_rejects_invalid_composite(tmp_path):
+def test_analyze_e3_bare_merged_requires_composite(tmp_path):
     ana = _load("scripts/analyze_smco_evo_highdim_paper.py")
-    merged = tmp_path / "merged"; merged.mkdir()
+    comp, *_, e2, bc = _build_valid_composite(tmp_path)
+    final = _e3_final_merged(tmp_path, e2, bc)
+    with pytest.raises(SystemExit):
+        ana.main(["--statistics", "--merged-dir", str(final)])  # no composite
+
+
+def test_analyze_e3_rejects_invalid_composite(tmp_path):
+    ana = _load("scripts/analyze_smco_evo_highdim_paper.py")
+    comp, *_, e2, bc = _build_valid_composite(tmp_path)
+    final = _e3_final_merged(tmp_path, e2, bc)
     (tmp_path / "comp.json").write_text(json.dumps({"frozen": False}))  # invalid
     with pytest.raises(SystemExit):
-        ana.main(["--stage", "e3-comparative-analysis", "--statistics",
-                  "--merged-dir", str(merged), "--composite", str(tmp_path / "comp.json")])
+        ana.main(["--statistics", "--merged-dir", str(final),
+                  "--composite", str(tmp_path / "comp.json")])
 
 
-def test_analyze_e3_statistics_rejects_when_merged_misses_row(tmp_path):
+def test_analyze_e3_rejects_when_merged_misses_row(tmp_path):
     ana = _load("scripts/analyze_smco_evo_highdim_paper.py")
-    comp, e2_mp, bc_mp, e2_dir, bc_dir, e2, bc = _build_valid_composite(tmp_path)
+    comp, *_, e2, bc = _build_valid_composite(tmp_path)
     comp_path = tmp_path / "comp.json"
     comp_path.write_text(json.dumps(comp))
-    # final merged missing one E2 row -> gate fails -> CLI exits before statistics
-    from test_confirmatory import _write_final_merged
-    final = _write_final_merged(tmp_path / "final", e2, bc,
-                                drop_run_id=e2["tasks"][0]["run_id"])
+    final = _e3_final_merged(tmp_path, e2, bc, drop_run_id=e2["tasks"][0]["run_id"])
     with pytest.raises(SystemExit):
-        ana.main(["--stage", "e3-comparative-analysis", "--statistics",
-                  "--merged-dir", str(final), "--composite", str(comp_path)])
+        ana.main(["--statistics", "--merged-dir", str(final), "--composite", str(comp_path)])
 
 
-def test_analyze_e1_statistics_does_not_require_composite(tmp_path, monkeypatch):
-    # E1/E2 analyses keep their original entry: --stage e1 without --composite
-    # must NOT trip the E3 gate — statistics proceeds (write_primary_table called).
+def _stub_primary_table(monkeypatch):
     import smco.paper_analysis
-    ana = _load("scripts/analyze_smco_evo_highdim_paper.py")
     called = {}
 
     def _fake(md, out, algos):
-        called["ran"] = True
+        called["ran"] = (str(md), list(algos))
         return []
 
     monkeypatch.setattr(smco.paper_analysis, "write_primary_table", _fake)
+    return called
+
+
+def test_analyze_e1_statistics_does_not_require_composite(tmp_path, monkeypatch):
+    # E1 data (no baselines) via bare --merged-dir proceeds with selection_candidates.
+    import csv as _csv
+    called = _stub_primary_table(monkeypatch)
+    ana = _load("scripts/analyze_smco_evo_highdim_paper.py")
     merged = tmp_path / "merged"; merged.mkdir()
-    rc = ana.main(["--stage", "e1-development", "--statistics", "--merged-dir", str(merged)])
+    with open(merged / "valid_runs.csv", "w", newline="") as f:
+        w = _csv.DictWriter(f, fieldnames=["run_id", "algorithm_id", "stage"])
+        w.writeheader()
+        for i in range(3):
+            w.writerow({"run_id": f"r{i}", "algorithm_id": "PY-SP-SMCO-EVO",
+                        "stage": "e1_development"})
+    rc = ana.main(["--statistics", "--merged-dir", str(merged)])
     assert rc == 0
     assert called.get("ran")  # statistics ran, no composite gate
 
 
-def test_analyze_e3_statistics_runs_after_valid_gate(tmp_path, monkeypatch):
-    # review §6.4: a valid composite + exact 420 merged -> statistics runs.
-    import smco.paper_analysis
+def test_analyze_e3_runs_after_valid_gate_uses_composite_algos(tmp_path, monkeypatch):
+    # review P0: valid composite + 420 merged -> statistics runs with the
+    # composite's 7 algorithms (NOT the 18 E1 candidates).
+    called = _stub_primary_table(monkeypatch)
     ana = _load("scripts/analyze_smco_evo_highdim_paper.py")
-    called = {}
-
-    def _fake(md, out, algos):
-        called["ran"] = (str(md), algos)
-        return []
-
-    monkeypatch.setattr(smco.paper_analysis, "write_primary_table", _fake)
-    comp, e2_mp, bc_mp, e2_dir, bc_dir, e2, bc = _build_valid_composite(tmp_path)
+    comp, *_, e2, bc = _build_valid_composite(tmp_path)
     comp_path = tmp_path / "comp.json"
     comp_path.write_text(json.dumps(comp))
-    from test_confirmatory import _write_final_merged
-    final = _write_final_merged(tmp_path / "final", e2, bc)
-    rc = ana.main(["--stage", "e3-comparative-analysis", "--statistics",
-                   "--merged-dir", str(final), "--composite", str(comp_path)])
+    final = _e3_final_merged(tmp_path, e2, bc)
+    rc = ana.main(["--statistics", "--merged-dir", str(final), "--composite", str(comp_path)])
     assert rc == 0
-    assert called.get("ran")  # gate passed, statistics executed
+    md, algos = called["ran"]
+    assert set(algos) == set(comp["algorithms"])  # 7 composite algorithms, not 18
+    assert "DE" in algos and "GenSA" in algos  # baselines NOT dropped
+
+
+def test_analyze_e3_via_canonical_index(tmp_path, monkeypatch):
+    # review P0: Task-12 resolves E3 inputs from the canonical index + key; the
+    # composite gate runs and algorithms come from the validated composite.
+    import smco.canonical_artifacts as ca
+    called = _stub_primary_table(monkeypatch)
+    ana = _load("scripts/analyze_smco_evo_highdim_paper.py")
+    comp, *_, e2, bc = _build_valid_composite(tmp_path)
+    comp_path = tmp_path / "comp.json"
+    comp_path.write_text(json.dumps(comp))
+    final = _e3_final_merged(tmp_path, e2, bc)
+    idx_path = tmp_path / "index.json"
+    idx_path.write_text(json.dumps({"schema_version": "1", "frozen": True, "artifacts": []}))
+    monkeypatch.setattr(ca, "validate_canonical_index", lambda index, **k: [])
+    monkeypatch.setattr(ca, "resolve_analysis_target",
+                        lambda index, key, **k: {"key": key, "merged_dir": str(final),
+                                                 "is_e3": True, "composite_path": str(comp_path)})
+    rc = ana.main(["--statistics", "--canonical-index", str(idx_path),
+                   "--artifact-key", "e3_composite_merged"])
+    assert rc == 0
+    _, algos = called["ran"]
+    assert set(algos) == set(comp["algorithms"])

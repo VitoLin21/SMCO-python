@@ -10,10 +10,91 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import sys
+from pathlib import Path
 
 from smco.selection import build_selection
+
+# Baseline algorithms only present in E3 comparative data. Used to detect E3
+# data handed in via a bare --merged-dir (which must be rejected — E3 needs the
+# composite gate, review P0).
+_E3_BASELINE_ALGOS = {"DE", "GA", "PSO", "SA", "GenSA"}
+
+
+def _merged_dir_is_e3(merged_dir) -> bool:
+    """True if a merged dir's valid_runs.csv contains E3 baseline algorithms."""
+    path = Path(merged_dir) / "valid_runs.csv"
+    if not path.exists():
+        return False
+    with open(path, newline="") as handle:
+        algos = {row.get("algorithm_id") for row in csv.DictReader(handle)}
+    return bool(algos & _E3_BASELINE_ALGOS)
+
+
+def _resolve_statistics_inputs(args, parser):
+    """Resolve (merged_dir, algorithms) for Task-12 statistics (review P0).
+
+    Preferred: ``--canonical-index`` + ``--artifact-key`` — the merged dir (and,
+    for E3, the composite path) come from the validated index, never a --stage
+    string or an arbitrary path. E3 statistics read the algorithm set from the
+    validated composite and force the composite gate.
+
+    Bare ``--merged-dir`` is kept for E1/E2 only; if it points at E3 data it is
+    rejected (E3 must go through the index/composite so the gate cannot be
+    bypassed with the default stage).
+    """
+    from smco.selection import selection_candidates
+
+    if args.canonical_index:
+        if not args.artifact_key:
+            parser.error("--canonical-index requires --artifact-key")
+        try:
+            from smco.canonical_artifacts import (
+                resolve_analysis_target, validate_canonical_index)
+            index = json.loads(Path(args.canonical_index).read_text())
+            errs = validate_canonical_index(index)
+            if errs:
+                parser.error("canonical index invalid:\n  " + "\n  ".join(errs))
+            target = resolve_analysis_target(index, args.artifact_key)
+        except (ValueError, FileNotFoundError) as exc:
+            parser.error(f"canonical index resolve failed: {exc}")
+        merged_dir = target["merged_dir"]
+        if target["is_e3"]:
+            from smco.confirmatory import enforce_e3_composite_gate
+            try:
+                enforce_e3_composite_gate(
+                    composite_path=target["composite_path"], merged_dir=merged_dir)
+            except (ValueError, FileNotFoundError) as exc:
+                parser.error(f"E3 composite gate failed: {exc}")
+            algos = json.loads(Path(target["composite_path"]).read_text())["algorithms"]
+        else:
+            algos = [c["algorithm_id"] for c in selection_candidates()]
+        return merged_dir, algos
+
+    if not args.merged_dir:
+        parser.error(
+            "--statistics requires --canonical-index + --artifact-key (preferred) "
+            "or --merged-dir")
+    merged_dir = args.merged_dir
+    # Defense-in-depth (review P0): default stage + E3 merged must still reject —
+    # E3 data cannot bypass the composite gate via a bare --merged-dir.
+    if _merged_dir_is_e3(merged_dir):
+        if not args.composite:
+            parser.error(
+                "merged dir contains E3 comparative data (baselines); E3 statistics "
+                "require --canonical-index --artifact-key e3_composite_merged (or "
+                "--composite) so the 120+300=420 composite gate runs")
+        from smco.confirmatory import enforce_e3_composite_gate
+        try:
+            enforce_e3_composite_gate(composite_path=args.composite, merged_dir=merged_dir)
+        except (ValueError, FileNotFoundError) as exc:
+            parser.error(f"E3 composite gate failed: {exc}")
+        algos = json.loads(Path(args.composite).read_text())["algorithms"]
+    else:
+        algos = [c["algorithm_id"] for c in selection_candidates()]
+    return merged_dir, algos
 
 
 def main(argv=None) -> int:
@@ -40,33 +121,26 @@ def main(argv=None) -> int:
     parser.add_argument("--development", action="store_true", help="Allow raw --result-dir JSON (development only).")
     parser.add_argument(
         "--composite", default=None,
-        help="E3 comparative composite JSON; REQUIRED for any E3-stage --statistics "
-             "(review §6.3). The composite and the final merged/ are validated before "
-             "any E3 statistics are produced.",
+        help="E3 comparative composite JSON (with --merged-dir only); the composite and "
+             "final merged/ are validated before any E3 statistics.",
+    )
+    parser.add_argument(
+        "--canonical-index", dest="canonical_index", default=None,
+        help="canonical_artifacts.json (review P0/§8): Task-12 statistics resolve their "
+             "merged dir (and, for E3, the composite) from the index + --artifact-key, "
+             "NOT from an arbitrary --merged-dir or a --stage string.",
+    )
+    parser.add_argument(
+        "--artifact-key", dest="artifact_key", default=None,
+        help="artifact key in the canonical index (e.g. e3_composite_merged, e1_merged). "
+             "Required with --canonical-index.",
     )
     args = parser.parse_args(argv)
 
     if args.statistics:
-        if not args.merged_dir:
-            parser.error("--statistics requires --merged-dir (canonical merged/ input)")
-        # P1c (review §6.3): an E3 comparative analysis must go through the
-        # composite gate — no statistics without a validated 120+300=420 composite.
-        is_e3 = args.composite is not None or "e3" in (args.stage or "").lower()
-        if is_e3:
-            if not args.composite:
-                parser.error(
-                    "E3 --statistics requires --composite <composite.json> "
-                    "(review §6.3); E1/E2 analyses keep their original entry")
-            try:
-                from smco.confirmatory import enforce_e3_composite_gate
-                enforce_e3_composite_gate(
-                    composite_path=args.composite, merged_dir=args.merged_dir)
-            except (ValueError, FileNotFoundError) as exc:
-                parser.error(f"E3 composite gate failed: {exc}")
+        merged_dir, algos = _resolve_statistics_inputs(args, parser)
         from smco.paper_analysis import write_primary_table
-        from smco.selection import selection_candidates
-        algos = [c["algorithm_id"] for c in selection_candidates()]
-        table = write_primary_table(args.merged_dir, args.out_dir, algos)
+        table = write_primary_table(merged_dir, args.out_dir, algos)
         print(f"wrote {args.out_dir}/primary_table.csv ({len(table)} algorithms)")
         return 0
 
