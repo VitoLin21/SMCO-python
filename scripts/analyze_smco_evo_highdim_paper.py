@@ -38,11 +38,31 @@ def main(argv=None) -> int:
     parser.add_argument("--statistics", action="store_true", help="Compute the Task-12 primary table from merged/ (audit must pass).")
     parser.add_argument("--dry-run", action="store_true", help="No results needed; report rules + candidates.")
     parser.add_argument("--development", action="store_true", help="Allow raw --result-dir JSON (development only).")
+    parser.add_argument(
+        "--composite", default=None,
+        help="E3 comparative composite JSON; REQUIRED for any E3-stage --statistics "
+             "(review §6.3). The composite and the final merged/ are validated before "
+             "any E3 statistics are produced.",
+    )
     args = parser.parse_args(argv)
 
     if args.statistics:
         if not args.merged_dir:
             parser.error("--statistics requires --merged-dir (canonical merged/ input)")
+        # P1c (review §6.3): an E3 comparative analysis must go through the
+        # composite gate — no statistics without a validated 120+300=420 composite.
+        is_e3 = args.composite is not None or "e3" in (args.stage or "").lower()
+        if is_e3:
+            if not args.composite:
+                parser.error(
+                    "E3 --statistics requires --composite <composite.json> "
+                    "(review §6.3); E1/E2 analyses keep their original entry")
+            try:
+                from smco.confirmatory import enforce_e3_composite_gate
+                enforce_e3_composite_gate(
+                    composite_path=args.composite, merged_dir=args.merged_dir)
+            except (ValueError, FileNotFoundError) as exc:
+                parser.error(f"E3 composite gate failed: {exc}")
         from smco.paper_analysis import write_primary_table
         from smco.selection import selection_candidates
         algos = [c["algorithm_id"] for c in selection_candidates()]

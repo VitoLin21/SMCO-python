@@ -893,6 +893,69 @@ def validate_composite(composite, *, e2_manifest_path=None,
     return errors
 
 
+def validate_e3_merged_against_composite(composite, merged_dir) -> list[str]:
+    """Review §6.3 #2-5: the final ``merged_composite/`` must be exactly the
+    420-row union of the two validated component run-id sets, its audit must be
+    the current 12-check version and pass, E2 rows must keep
+    ``stage=e2_factorial_highdim`` (not be rewritten to an E3 stage), and
+    baseline rows must keep ``stage=e3_companion_baselines``. Returns [] on pass.
+    """
+    errors: list[str] = []
+    merged = Path(merged_dir)
+    vr = merged / "valid_runs.csv"
+    au = merged / "provenance_audit.json"
+    if not vr.exists():
+        return [f"merged valid_runs.csv missing: {vr}"]
+    final_rids = _run_ids_from_csv(vr)
+    wb = composite.get("components", {}).get("winner_base", {})
+    be = composite.get("components", {}).get("baseline_extension", {})
+    e2_rids = _run_ids_from_csv(Path(wb["merged_dir"]) / "valid_runs.csv")
+    bc_rids = _run_ids_from_csv(Path(be["merged_dir"]) / "valid_runs.csv")
+    union = e2_rids | bc_rids
+    if final_rids != union:
+        only_final = sorted(final_rids - union)[:3]
+        only_union = sorted(union - final_rids)[:3]
+        errors.append(
+            f"merged run-ids ({len(final_rids)}) != composite union ({len(union)}); "
+            f"only-in-merged={only_final} only-in-union={only_union}")
+    if len(final_rids) != 420:
+        errors.append(f"merged has {len(final_rids)} rows, expected 420")
+    if au.exists():
+        ok, msg = _audit_passes_provenance(json.loads(au.read_text()))
+        if not ok:
+            errors.append(f"merged audit: {msg}")
+    else:
+        errors.append(f"merged audit missing: {au}")
+    # stage preservation: E2 rows keep their original stage, baseline rows keep
+    # e3_companion_baselines (the merge must NOT rewrite E2 stage to an E3 stage)
+    csv_map = _csv_identity_map(vr)
+    e2_stage, bc_stage = wb.get("stage"), be.get("stage")
+    e2_ok = sum(1 for r in e2_rids if csv_map.get(r, (None, None))[1] == e2_stage)
+    bc_ok = sum(1 for r in bc_rids if csv_map.get(r, (None, None))[1] == bc_stage)
+    if e2_ok != len(e2_rids):
+        errors.append(
+            f"only {e2_ok}/{len(e2_rids)} E2 rows kept stage {e2_stage!r} "
+            f"(E2 rows must not be rewritten to an E3 stage)")
+    if bc_ok != len(bc_rids):
+        errors.append(
+            f"only {bc_ok}/{len(bc_rids)} baseline rows kept stage {bc_stage!r}")
+    return errors
+
+
+def enforce_e3_composite_gate(*, composite_path, merged_dir) -> dict:
+    """Review §6.3 #1: validate the composite, then verify the final merged dir
+    matches it. Returns the validated composite, or raises ``ValueError`` listing
+    every violation. The E3 analysis CLI calls this before any statistics."""
+    composite = json.loads(Path(composite_path).read_text())
+    errs = validate_composite(composite)
+    if errs:
+        raise ValueError("composite validation failed: " + "; ".join(errs))
+    errs = validate_e3_merged_against_composite(composite, merged_dir)
+    if errs:
+        raise ValueError("merged vs composite mismatch: " + "; ".join(errs))
+    return composite
+
+
 __all__ = [
     "is_run_complete",
     "baseline_component_errors",
@@ -900,6 +963,8 @@ __all__ = [
     "build_comparative_composite",
     "composite_sha256",
     "validate_composite",
+    "validate_e3_merged_against_composite",
+    "enforce_e3_composite_gate",
     "plan_batch",
     "build_confirmatory_manifest",
     "confirmatory_errors",

@@ -13,9 +13,11 @@ from smco.confirmatory import (
     build_confirmatory_manifest,
     confirmatory_errors,
     enforce_confirmatory,
+    enforce_e3_composite_gate,
     is_run_complete,
     plan_batch,
     validate_composite,
+    validate_e3_merged_against_composite,
 )
 from smco.experiment_manifests import (
     build_algorithm_config,
@@ -817,3 +819,94 @@ def test_confirmatory_coco_contract_rejects_duplicate_combo():
     with pytest.raises(ValueError, match="duplicate"):
         confirmatory_coco_contract(
             manifest, expected_algos=algos, expected_dims=E4_DIMENSIONS)
+
+
+# --- P1c strict: E3 composite analysis gate (review §6.3 / §6.4) ---
+# The final merged_composite must be exactly the 420-row union of the two
+# validated component run-id sets, with a 12-check audit and preserved stages.
+
+def _write_final_merged(tmp, e2, bc, *, n_checks=12, drop_run_id=None,
+                        extra_run_id=None, rewrite_e2_stage=None):
+    """Write a merged_composite/ that unions the E2 + baseline manifest rows."""
+    import csv as _csv
+    d = tmp / "merged"; d.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for manifest in (e2, bc):
+        for t in manifest["tasks"]:
+            rid = t["run_id"]
+            if drop_run_id is not None and rid == drop_run_id:
+                continue
+            stage = t.get("stage")
+            if rewrite_e2_stage is not None and manifest is e2:
+                stage = rewrite_e2_stage
+            rows.append({"run_id": rid,
+                         "algorithm_id": t.get("algorithm_id") or t.get("algorithm"),
+                         "stage": stage})
+    if extra_run_id is not None:
+        rows.append({"run_id": extra_run_id, "algorithm_id": "DE",
+                     "stage": "e3_companion_baselines"})
+    with open(d / "valid_runs.csv", "w", newline="") as f:
+        w = _csv.DictWriter(f, fieldnames=["run_id", "algorithm_id", "stage"])
+        w.writeheader(); w.writerows(rows)
+    checks = [{"name": f"check_{i}", "passed": True, "n": len(rows), "errors": []}
+              for i in range(max(0, n_checks))]
+    if n_checks >= 12:
+        checks[-1] = {"name": "provenance_complete", "passed": True,
+                      "n": len(rows), "errors": []}
+    (d / "provenance_audit.json").write_text(
+        json.dumps({"passed": all(c["passed"] for c in checks), "failed_checks": [],
+                    "checks": checks, "n_rows": len(rows)}))
+    return d
+
+
+def test_e3_gate_passes_valid_composite_and_final_merged(tmp_path):
+    comp, *_, e2, bc = _build_valid_composite(tmp_path)
+    final = _write_final_merged(tmp_path / "final", e2, bc)
+    assert validate_e3_merged_against_composite(comp, final) == []
+    comp_path = tmp_path / "comp.json"
+    comp_path.write_text(json.dumps(comp))
+    out = enforce_e3_composite_gate(composite_path=str(comp_path), merged_dir=str(final))
+    assert out["total_runs"] == 420
+
+
+def test_e3_gate_rejects_merged_missing_row(tmp_path):
+    comp, *_, e2, bc = _build_valid_composite(tmp_path)
+    final = _write_final_merged(tmp_path / "final", e2, bc,
+                                drop_run_id=e2["tasks"][0]["run_id"])
+    errs = validate_e3_merged_against_composite(comp, final)
+    assert any("union" in e or "420" in e for e in errs)
+
+
+def test_e3_gate_rejects_merged_extra_row(tmp_path):
+    comp, *_, e2, bc = _build_valid_composite(tmp_path)
+    final = _write_final_merged(tmp_path / "final", e2, bc,
+                                extra_run_id="bBOGUS00000000000")
+    errs = validate_e3_merged_against_composite(comp, final)
+    assert any("union" in e or "420" in e for e in errs)
+
+
+def test_e3_gate_rejects_e2_stage_rewritten_to_e3(tmp_path):
+    # review §6.3 #4: E2 rows must keep stage=e2_factorial_highdim; rewriting
+    # them to an E3 stage must be rejected.
+    comp, *_, e2, bc = _build_valid_composite(tmp_path)
+    final = _write_final_merged(tmp_path / "final", e2, bc,
+                                rewrite_e2_stage="e3_comparative_analysis")
+    errs = validate_e3_merged_against_composite(comp, final)
+    assert any("stage" in e.lower() for e in errs)
+
+
+def test_e3_gate_rejects_old_11check_merged_audit(tmp_path):
+    comp, *_, e2, bc = _build_valid_composite(tmp_path)
+    final = _write_final_merged(tmp_path / "final", e2, bc, n_checks=11)
+    errs = validate_e3_merged_against_composite(comp, final)
+    assert any("audit" in e.lower() or "provenance" in e.lower() for e in errs)
+
+
+def test_e3_gate_rejects_when_composite_invalid(tmp_path):
+    comp, *_, e2, bc = _build_valid_composite(tmp_path)
+    comp["frozen"] = False  # break the composite (hash now inconsistent)
+    final = _write_final_merged(tmp_path / "final", e2, bc)
+    comp_path = tmp_path / "comp.json"
+    comp_path.write_text(json.dumps(comp))
+    with pytest.raises(ValueError, match="composite validation"):
+        enforce_e3_composite_gate(composite_path=str(comp_path), merged_dir=str(final))
