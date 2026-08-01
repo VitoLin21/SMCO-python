@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from smco.confirmatory import (
+    build_baseline_component_manifest,
     build_confirmatory_manifest,
     confirmatory_errors,
     enforce_confirmatory,
@@ -202,6 +203,44 @@ def test_build_confirmatory_manifest_rejects_missing_stage():
             functions=["Rastrigin"], dims=[200], n_instances=1,
             fe_budget_per_d=1000, checkpoints_per_d=(1000,),
             instance_index=empty_index,
+        )
+
+
+# --- P1c: baseline component manifest ---
+
+def test_build_baseline_component_no_winner_base():
+    sel = _selection()
+    manifest = build_baseline_component_manifest(
+        sel, functions=["Rastrigin"], dims=[200], n_instances=1,
+        fe_budget_per_d=1000, checkpoints_per_d=(1000,),
+    )
+    assert manifest["frozen"] is True
+    assert manifest["component_role"] == "baseline_extension"
+    assert manifest["baseline_algorithms"] == ["DE", "GA", "PSO", "SA", "GenSA"]
+    assert "winner_algorithm" not in manifest
+    assert "winner_config_hash" not in manifest
+    algos = {t.get("algorithm") for t in manifest["tasks"]}
+    assert algos == {"DE", "GA", "PSO", "SA", "GenSA"}
+    assert len(manifest["tasks"]) == 5  # 1 func × 1 dim × 1 inst × 5 baselines
+
+
+def test_build_baseline_component_rejects_wrong_stage():
+    sel = _selection()
+    with pytest.raises(ValueError, match="stage"):
+        build_baseline_component_manifest(
+            sel, stage="e2_factorial_highdim",
+            functions=["Rastrigin"], dims=[200], n_instances=1,
+            fe_budget_per_d=1000, checkpoints_per_d=(1000,),
+        )
+
+
+def test_build_baseline_component_rejects_wrong_baselines():
+    sel = _selection()
+    with pytest.raises(ValueError, match="baselines"):
+        build_baseline_component_manifest(
+            sel, baselines=("DE", "GA"),
+            functions=["Rastrigin"], dims=[200], n_instances=1,
+            fe_budget_per_d=1000, checkpoints_per_d=(1000,),
         )
 
 

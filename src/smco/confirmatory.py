@@ -318,8 +318,62 @@ def confirmatory_coco_contract(
     return sorted(expected)
 
 
+# --- P1c: E3 composite manifest (baseline component + comparative composite) ---
+
+_BASELINE_EXTENSION_BASELINES = ("DE", "GA", "PSO", "SA", "GenSA")
+_BASELINE_EXTENSION_STAGE = "e3_companion_baselines"
+_BASELINE_EXTENSION_SUITE = "synthetic_highdim"
+
+
+def build_baseline_component_manifest(
+    selection, *,
+    stage=_BASELINE_EXTENSION_STAGE,
+    suite=_BASELINE_EXTENSION_SUITE,
+    functions, dims, n_instances,
+    fe_budget_per_d, checkpoints_per_d,
+    baselines=_BASELINE_EXTENSION_BASELINES,
+    instance_index=None, manifest_id=None,
+) -> dict:
+    """P1c: build a frozen baseline-only component manifest (no winner/base).
+
+    The E3 comparative analysis reuses E2's audited winner/base (120 rows,
+    stage=e2) and only runs the 5 baselines fresh. This component carries
+    exactly ``baselines × functions × dims × n_instances`` tasks.
+    ``component_role="baseline_extension"`` lets Gate-F skip winner-present
+    checks, but only when ALL structural constraints are met (stage, suite,
+    baselines, selection_hash) — see :func:`confirmatory_errors`.
+    """
+    if stage != _BASELINE_EXTENSION_STAGE:
+        raise ValueError(
+            f"baseline component stage must be {_BASELINE_EXTENSION_STAGE!r}, "
+            f"got {stage!r}")
+    if suite != _BASELINE_EXTENSION_SUITE:
+        raise ValueError(
+            f"baseline component suite must be {_BASELINE_EXTENSION_SUITE!r}, "
+            f"got {suite!r}")
+    if tuple(baselines) != _BASELINE_EXTENSION_BASELINES:
+        raise ValueError(
+            f"baseline component baselines must be exactly "
+            f"{_BASELINE_EXTENSION_BASELINES}, got {tuple(baselines)}")
+    tasks = list(expand_baseline_tasks(
+        stage, suite, functions, dims, n_instances, baselines,
+        fe_budget_per_d=fe_budget_per_d, checkpoints_per_d=checkpoints_per_d,
+        instance_index=instance_index,
+    ))
+    expected = len(functions) * len(dims) * n_instances * len(baselines)
+    if len(tasks) != expected:
+        raise ValueError(
+            f"baseline component has {len(tasks)} tasks, expected {expected}")
+    manifest = build_manifest(stage, suite, tasks, manifest_id=manifest_id)
+    manifest["component_role"] = "baseline_extension"
+    manifest["selection_hash"] = selection.get("selection_hash")
+    manifest["baseline_algorithms"] = list(baselines)
+    return freeze_manifest(manifest)
+
+
 __all__ = [
     "is_run_complete",
+    "build_baseline_component_manifest",
     "plan_batch",
     "build_confirmatory_manifest",
     "confirmatory_errors",
