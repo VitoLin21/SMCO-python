@@ -19,6 +19,7 @@ from .experiment_manifests import (
     result_row_from_task,
     verify_manifest,
 )
+from .coco_outcome import COCO_SUITES, coco_outcome_errors
 from .paper_contract import NONE_TOKEN, RESULT_COLUMNS, SCHEMA_VERSION, STATUSES
 
 _CONFIRMATORY_STAGES = {
@@ -178,13 +179,22 @@ def _check(name: str, rows: list[dict], ok: bool, errors: list[str]) -> dict:
     return {"name": name, "passed": ok, "n": len(rows), "errors": errors}
 
 
-def audit_payloads(rows: list[dict], task_index: dict[str, dict]) -> dict:
-    """Run the 11 provenance checks; return {passed, failed_checks, checks, n_rows}.
+def audit_payloads(rows: list[dict], task_index: dict[str, dict],
+                   *, outcome_index: dict[str, dict] | None = None) -> dict:
+    """Run the provenance checks; return {passed, failed_checks, checks, n_rows}.
 
-    ``passed=False`` does not crash the merge — the analysis layer (Task 12)
-    refuses to build primary tables when the audit fails.
+    Synthetic high-dim rows get the 12 synthetic checks. COCO-suite rows
+    (E4/E5 external validation) have no ``start_points_hash``/instance hash, so
+    check 8 is restricted to non-COCO rows and a ``benchmark_provenance`` check
+    validates their COCO benchmark provenance instead — never passing them via
+    empty/None synthetic fields (review P3). ``outcome_index`` (run_id -> raw
+    outcome) supplies the benchmark block; it is required when COCO rows exist.
+    ``passed=False`` does not crash the merge — the analysis layer refuses to
+    build tables when the audit fails.
     """
     checks: list[dict] = []
+    coco_rows = [r for r in rows if r.get("suite") in COCO_SUITES]
+    non_coco_rows = [r for r in rows if r.get("suite") not in COCO_SUITES]
 
     # 1. run_id uniqueness
     ids = [r["run_id"] for r in rows]
@@ -235,9 +245,12 @@ def audit_payloads(rows: list[dict], task_index: dict[str, dict]) -> dict:
     checks.append(_check("gap_sanity", rows, not bad_gap,
                          [f"best<optimum: {b}" for b in bad_gap]))
 
-    # 8. start_points_hash consistent within (function,dim,instance,n_starts)
+    # 8. start_points_hash consistent within (function,dim,instance,n_starts).
+    # COCO rows have no synthetic starts hash — exclude them (their instance
+    # provenance is the benchmark_provenance check below), so they cannot pass
+    # this synthetic check via empty/None values (review P3).
     by_inst: dict[tuple, set] = {}
-    for r in rows:
+    for r in non_coco_rows:
         # n_starts in the key so legitimate E6.1 tiers (same instance, more
         # starts -> a different starts artifact) are not flagged as a clash.
         key = (r["function"], int(r["dimension"]), int(r["instance"]), int(r["n_starts"]))
@@ -289,6 +302,21 @@ def audit_payloads(rows: list[dict], task_index: dict[str, dict]) -> dict:
                          [f"missing provenance (git_commit/environment_hash/machine_id): {m}"
                           for m in missing_prov]))
 
+    # 13 (COCO only, review P3): validate the benchmark provenance of every
+    # COCO-suite row against its raw outcome (problem id, f_opt, native
+    # best/evaluations, cocoex version, code provenance). Present only when COCO
+    # rows exist, so purely synthetic merges keep exactly 12 checks.
+    if coco_rows:
+        bad_bench: list[str] = []
+        for r in coco_rows:
+            outcome = (outcome_index or {}).get(r["run_id"])
+            if outcome is None:
+                bad_bench.append(f"{r['run_id']}: no raw outcome for benchmark provenance")
+                continue
+            for err in coco_outcome_errors(outcome):
+                bad_bench.append(f"{r['run_id']}: {err}")
+        checks.append(_check("benchmark_provenance", coco_rows, not bad_bench, bad_bench))
+
     failed = [c["name"] for c in checks if not c["passed"]]
     return {
         "passed": not failed,
@@ -338,8 +366,10 @@ def merge(manifest_paths, raw_dirs, merged_dir) -> dict:
     task_index = build_task_index(manifest_paths)
 
     attempts: list[dict] = []
+    outcome_index: dict[str, dict] = {}
     for _path, outcome in load_raw_outcomes(raw_dirs):
         run_id = outcome["run_id"]
+        outcome_index[run_id] = outcome
         task = task_index.get(run_id)
         if task is None:
             # A-08 #2: orphan (run_id in no manifest). Build a row from the
@@ -355,7 +385,7 @@ def merge(manifest_paths, raw_dirs, merged_dir) -> dict:
             attempts.append(baseline_row_from_outcome(outcome, task, manifest_id=mid))
 
     valid, superseded = resolve_supersedes(attempts)
-    audit = audit_payloads(attempts, task_index)
+    audit = audit_payloads(attempts, task_index, outcome_index=outcome_index)
 
     # missing = manifest tasks with no raw outcome
     have = {r["run_id"] for r in attempts}

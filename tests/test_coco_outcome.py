@@ -87,3 +87,76 @@ def test_coco_benchmark_provenance_recognises_block():
     assert coco_benchmark_provenance(payload) is payload["benchmark"]
     assert coco_benchmark_provenance({"benchmark": {"kind": "synthetic"}}) is None
     assert "bbob-largescale" in COCO_SUITES and "bbob" in COCO_SUITES
+
+
+# --- audit integration (review P3): COCO rows validated via benchmark_provenance ---
+
+def _e4_task(run_id="rE4_001"):
+    from smco.experiment_manifests import derive_seed
+    return {
+        "schema_version": "1", "manifest_id": "e4_bbob_largescale__bbob-largescale",
+        "stage": "e4_bbob_largescale", "suite": "bbob-largescale",
+        "function": "f1", "dimension": 160, "instance": 0, "replication": 0,
+        "seed": derive_seed("e4_bbob_largescale", "bbob-largescale", "f1", 160, 0, 0,
+                            "PY-SP-SMCO-EVO"),
+        "language": "python", "state_semantics": "state_preserving",
+        "family": "smco", "evolutionary": "true", "evolution_strategy": "rand1bin",
+        "algorithm_id": "PY-SP-SMCO-EVO", "n_starts": 8, "fe_budget": 160000,
+        "configuration_hash": "cfg_e4", "run_id": run_id,
+        "start_points_hash": None, "instance_hash": None,
+    }
+
+
+def _e4_outcome(task):
+    return build_coco_outcome(
+        task, best_observed_fvalue1=1.5, evaluations=160000, final_target_hit=False,
+        best_trace=[(1, 100.0), (80000, 12.0), (160000, 1.5)], f_opt=0.0,
+        initial_ref=100.0, fe_budget=160000, suite="bbob-largescale",
+        problem_id="bbob-largescale_f001_i1_d160", cocoex_version="3.4.0",
+        cocopp_version="2.7.1", machine_id="node213",
+        git_commit="c" * 40, environment_hash="eh")
+
+
+def test_audit_recognises_coco_and_validates_benchmark_provenance():
+    from smco.merge_results import audit_payloads, smco_row_from_outcome
+    task = _e4_task()
+    outcome = _e4_outcome(task)
+    row = smco_row_from_outcome(outcome, task, manifest_id=task["manifest_id"])
+    audit = audit_payloads([row], {task["run_id"]: task},
+                           outcome_index={task["run_id"]: outcome})
+    names = [c["name"] for c in audit["checks"]]
+    assert "benchmark_provenance" in names          # COCO check present
+    bp = next(c for c in audit["checks"] if c["name"] == "benchmark_provenance")
+    assert bp["passed"] is True                      # valid COCO provenance
+    assert bp["n"] == 1                              # only COCO rows
+    # start_points_hash check did NOT inspect the COCO row (no synthetic instance)
+    assert all(c["passed"] for c in audit["checks"])
+    assert audit["passed"] is True
+
+
+def test_audit_rejects_coco_with_broken_benchmark_provenance():
+    from smco.merge_results import audit_payloads, smco_row_from_outcome
+    task = _e4_task()
+    outcome = _e4_outcome(task)
+    outcome["benchmark"]["problem_id"] = ""          # break provenance
+    row = smco_row_from_outcome(outcome, task, manifest_id=task["manifest_id"])
+    audit = audit_payloads([row], {task["run_id"]: task},
+                           outcome_index={task["run_id"]: outcome})
+    bp = next(c for c in audit["checks"] if c["name"] == "benchmark_provenance")
+    assert bp["passed"] is False
+    assert audit["passed"] is False
+
+
+def test_synthetic_merge_keeps_exactly_12_checks():
+    # no COCO rows -> no benchmark_provenance check; synthetic count unchanged
+    from smco.merge_results import audit_payloads, smco_row_from_outcome
+    task = dict(_e4_task(), suite="synthetic_highdim", stage="e2_factorial_highdim",
+                start_points_hash="sph", instance_hash="ih")
+    outcome = {"run_id": task["run_id"], "best_value": 1.0, "known_optimum": 0.0,
+               "normalized_gap": 0.1, "fe_used": 100, "status": "success",
+               "machine_id": "n", "git_commit": "c" * 40, "environment_hash": "eh",
+               "target_hit_fe": {}}
+    row = smco_row_from_outcome(outcome, task, manifest_id=task["manifest_id"])
+    audit = audit_payloads([row], {task["run_id"]: task})
+    assert len(audit["checks"]) == 12
+    assert all(c["name"] != "benchmark_provenance" for c in audit["checks"])
