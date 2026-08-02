@@ -44,6 +44,34 @@ def build_report(analysis_dir, out_path) -> Path:
             )
         lines.append("")
 
+    pw_path = analysis_dir / "pairwise_table.csv"
+    if pw_path.exists():
+        pairs = list(csv.DictReader(open(pw_path)))
+        lines.append("## Pairwise comparison (from pairwise_table.csv)")
+        lines.append("")
+        lines.append("Holm step-down adjusted p (paired by function x dimension x instance;")
+        lines.append("median_log_gap_diff < 0 means algorithm_a reaches a lower gap).")
+        lines.append("")
+        lines.append("| algorithm_a | algorithm_b | n_pairs | median_log_gap_diff | prob_a_better | p_value | p_holm |")
+        lines.append("| --- | --- | --- | --- | --- | --- | --- |")
+        for r in pairs:
+            lines.append(
+                f"| {r.get('algorithm_a','')} | {r.get('algorithm_b','')} | "
+                f"{r.get('n_pairs','')} | {r.get('median_log_gap_diff','')} | "
+                f"{r.get('prob_a_better','')} | {r.get('p_value','')} | "
+                f"{r.get('p_holm','')} |"
+            )
+        lines.append("")
+
+    figures = sorted(analysis_dir.glob("ecdf_target_*.png"))
+    if figures:
+        lines.append("## ECDF figures")
+        lines.append("")
+        for fig in figures:
+            rel = fig.relative_to(analysis_dir) if fig.is_relative_to(analysis_dir) else fig
+            lines.append(f"![{fig.stem}]({rel})")
+        lines.append("")
+
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text("\n".join(lines) + "\n")

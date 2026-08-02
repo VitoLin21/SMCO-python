@@ -234,3 +234,27 @@ def test_write_pairwise_table_csv(tmp_path):
     assert len(written) == 1
     assert {written[0]["algorithm_a"], written[0]["algorithm_b"]} == {"A", "B"}
     assert written[0]["p_holm"] != ""
+
+
+def test_package_report_traces_pairwise_and_figures(tmp_path):
+    # §9 Task-13: report.md also traces pairwise_table.csv (Holm) + ECDF figures.
+    import importlib.util
+    from pathlib import Path
+    with open(tmp_path / "primary_table.csv", "w", newline="") as h:
+        w = csv.writer(h)
+        w.writerow(["algorithm_id", "n_runs", "ecdf_auc", "median_log_gap",
+                    "failure_rate", "ert_1e-1", "ert_1e-5"])
+        w.writerow(["PY-SP-SMCO-EVO", 60, 0.42, -3.1, 0.0, 1234, 50000])
+    with open(tmp_path / "pairwise_table.csv", "w", newline="") as h:
+        w = csv.writer(h)
+        w.writerow(["algorithm_a", "algorithm_b", "n_pairs", "median_log_gap_diff",
+                    "diff_ci_lo", "diff_ci_hi", "prob_a_better", "p_value", "p_holm"])
+        w.writerow(["PY-SP-SMCO-EVO", "DE", 60, "-1.14", "-1.3", "-1.0", "0.98", "0.0", "0.0"])
+    (tmp_path / "ecdf_target_1e-2.png").write_bytes(b"\x89PNG fake")
+    spec = importlib.util.spec_from_file_location(
+        "pkg_cli", Path("scripts/package_smco_evo_highdim_paper.py"))
+    cli = importlib.util.module_from_spec(spec); spec.loader.exec_module(cli)
+    text = cli.build_report(tmp_path, tmp_path / "report.md").read_text()
+    assert "Pairwise comparison" in text
+    assert "-1.14" in text and "0.98" in text      # median diff + prob traced
+    assert "ecdf_target_1e-2.png" in text           # figure referenced
