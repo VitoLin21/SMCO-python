@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import sys
 from pathlib import Path
+
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
@@ -183,6 +186,55 @@ def _resolve_winner_baselines(args, parser):
             "fe_budget_per_d": args.fe_budget_per_d}
 
 
+def _run_e4_shard(args, parser) -> int:
+    """Task-level E4 sharding mode (review P3): run a manifest run_id shard on
+    cocoex, emitting one COCO outcome JSON per run_id. No aggregate CSV."""
+    import socket
+    if not args.manifest or not args.selection:
+        parser.error("task-level --only-run-ids requires --manifest AND --selection")
+    resolved = _resolve_winner_baselines(args, parser)  # validates manifest+selection+matrix+contract
+    from smco.experiment_manifests import load_manifest, verify_manifest
+    manifest = load_manifest(args.manifest)
+    verify_manifest(manifest)
+    wanted = set(args.only_run_ids)
+    tasks = [t for t in manifest["tasks"] if t["run_id"] in wanted]
+    missing = wanted - {t["run_id"] for t in tasks}
+    if missing:
+        parser.error(f"run_ids not in manifest: {sorted(missing)[:5]}")
+    import cocoex
+    suite_obj = cocoex.Suite(
+        resolved["suite"],
+        f"instances:{','.join(str(i) for i in resolved['instances'])}",
+        f"dimensions:{','.join(str(d) for d in resolved['dims'])}",
+    )
+    from smco.coco_runner import dispatch_e4_tasks
+    statuses = dispatch_e4_tasks(
+        tasks, suite_obj, result_dir=args.result_dir,
+        machine_id=args.machine_id if args.machine_id is not None else socket.gethostname(),
+        git_commit=args.git_commit if args.git_commit is not None else _default_git_commit(),
+        environment_hash=(args.environment_hash if args.environment_hash is not None
+                          else _default_environment_hash()),
+        suite=resolved["suite"])
+    print(json.dumps(statuses, indent=2))
+    return 0
+
+
+def _default_git_commit() -> str:
+    import subprocess
+    try:
+        return subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
+                              text=True, check=True, timeout=5).stdout.strip()
+    except Exception:
+        return ""
+
+
+def _default_environment_hash() -> str:
+    import platform
+    payload = {"python": platform.python_version(), "numpy": np.__version__,
+               "platform": platform.platform()}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--winner", default=None, help="Frozen E1 winner (development mode; canonical uses --manifest).")
@@ -195,11 +247,22 @@ def main(argv=None) -> int:
     parser.add_argument("--fe-budget-per-d", type=int, default=1000)
     parser.add_argument("--baselines", nargs="+", default=list(BASELINES))
     parser.add_argument("--result-dir", required=True)
+    # task-level sharding mode (review P3): one COCO outcome JSON per run_id,
+    # shardable across machines by the frozen manifest's run_id set.
+    parser.add_argument("--only-run-ids", dest="only_run_ids", nargs="+", default=None,
+                        help="Task-level mode: run only these manifest run_ids (shard). "
+                             "Emits <result-dir>/<run_id>.json per task instead of aggregate CSV.")
+    parser.add_argument("--machine-id", default=None, help="Defaults to hostname.")
+    parser.add_argument("--git-commit", default=None, help="Defaults to current HEAD.")
+    parser.add_argument("--environment-hash", default=None, help="Defaults to a py/numpy hash.")
     args = parser.parse_args(argv)
 
     if not _have_cocoex():
         print("ERROR: cocoex not installed. Install with: pip install coco-experiment", file=sys.stderr)
         return 2
+
+    if args.only_run_ids:
+        return _run_e4_shard(args, parser)
 
     resolved = _resolve_winner_baselines(args, parser)
     summary = run_bbob_largescale(

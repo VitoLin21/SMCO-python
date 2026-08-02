@@ -361,6 +361,74 @@ def coco_versions():
     return cocoex_v, cocopp_v
 
 
+def match_manifest_to_coco_problems(tasks, suite_obj, *, instance_offset: int = 1):
+    """Match each manifest task to its cocoex problem.
+
+    Manifest ``function`` ``"fN"`` -> cocoex ``id_function`` N; manifest
+    ``instance`` i -> cocoex ``id_instance`` i + ``instance_offset`` (the E4
+    manifest stores 0-based instance indices while cocoex uses 1-based, so the
+    default offset is 1 — P4 verifies against ``problem.id_instance``).
+    Returns ``{run_id: problem}``. Raises if ANY requested task has no matching
+    problem (no silent skip / no shard can be incomplete).
+    """
+    index: dict[tuple, object] = {}
+    for problem in suite_obj:
+        index[(int(problem.id_function), int(problem.dimension),
+               int(problem.id_instance))] = problem
+    matched: dict[str, object] = {}
+    for task in tasks:
+        n = int(str(task["function"]).lstrip("fF"))
+        coco_instance = int(task["instance"]) + int(instance_offset)
+        key = (n, int(task["dimension"]), coco_instance)
+        if key not in index:
+            raise ValueError(
+                f"task {task['run_id']}: no cocoex problem for "
+                f"(function={n}, dimension={task['dimension']}, instance={coco_instance})")
+        matched[task["run_id"]] = index[key]
+    return matched
+
+
+def dispatch_e4_tasks(
+    tasks,
+    suite_obj,
+    *,
+    result_dir,
+    machine_id: str = "",
+    git_commit: str = "",
+    environment_hash: str = "",
+    suite: str = "bbob-largescale",
+    instance_offset: int = 1,
+    require_f_opt: bool = True,
+):
+    """Run a shard of E4 manifest ``tasks`` on their cocoex problems, writing one
+    COCO outcome JSON per run_id under ``result_dir`` (review P3 sharding).
+
+    Sharding is by the frozen manifest's run_id set only. ``f_opt`` comes from
+    :func:`coco_problem_f_opt`; if it is unavailable and ``require_f_opt`` is
+    set, the task FAILS rather than emit a faked gap (review P3 honesty rule).
+    Returns a per-run_id status dict. Requires cocoex at runtime (P4).
+    """
+    problems = match_manifest_to_coco_problems(
+        tasks, suite_obj, instance_offset=instance_offset)
+    statuses: dict[str, str] = {}
+    for task in tasks:
+        run_id = task["run_id"]
+        problem = problems[run_id]
+        try:
+            f_opt = coco_problem_f_opt(problem)
+            if require_f_opt and f_opt is None:
+                raise ValueError("cocoex problem exposes no known f_opt; refusing to fake")
+            run_e4_coco_task(
+                task, problem, f_opt=(0.0 if f_opt is None else f_opt),
+                result_dir=result_dir, machine_id=machine_id, git_commit=git_commit,
+                environment_hash=environment_hash, suite=suite,
+                n_starts=task.get("n_starts"))
+            statuses[run_id] = "success"
+        except Exception as exc:  # noqa: BLE001 — record, don't abort the shard
+            statuses[run_id] = f"failed: {type(exc).__name__}: {exc}"
+    return statuses
+
+
 def run_e4_coco_task(
     task: dict,
     problem,
@@ -427,4 +495,5 @@ def run_e4_coco_task(
 __all__ = ["problem_seed", "run_on_problem", "run_baseline_on_problem",
            "aggregate_instance_summary", "write_run_provenance",
            "coco_problem_id", "coco_problem_f_opt", "coco_versions",
+           "match_manifest_to_coco_problems", "dispatch_e4_tasks",
            "run_e4_coco_task"]
