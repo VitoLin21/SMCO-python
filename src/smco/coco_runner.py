@@ -388,6 +388,27 @@ def match_manifest_to_coco_problems(tasks, suite_obj, *, instance_offset: int = 
     return matched
 
 
+def fresh_coco_problem(suite_obj, task: dict, *, instance_offset: int = 1):
+    """Return a fresh COCO problem for exactly one task.
+
+    A COCO ``Problem`` accumulates evaluations and best-observed state.  It is
+    consequently invalid to share one object between algorithms.  Real
+    ``cocoex.Suite`` exposes ``get_problem_by_function_dimension_instance`` and
+    returns a fresh wrapper on every call.  The deepcopy fallback is solely for
+    small test doubles that only implement iteration.
+    """
+    function = int(str(task["function"]).lstrip("fF"))
+    dimension = int(task["dimension"])
+    instance = int(task["instance"]) + int(instance_offset)
+    getter = getattr(suite_obj, "get_problem_by_function_dimension_instance", None)
+    if callable(getter):
+        return getter(function, dimension, instance)
+    import copy
+    matched = match_manifest_to_coco_problems([task], suite_obj,
+                                               instance_offset=instance_offset)
+    return copy.deepcopy(matched[task["run_id"]])
+
+
 def dispatch_e4_tasks(
     tasks,
     suite_obj,
@@ -398,15 +419,18 @@ def dispatch_e4_tasks(
     environment_hash: str = "",
     suite: str = "bbob-largescale",
     instance_offset: int = 1,
-    require_f_opt: bool = True,
+    require_f_opt: bool = False,
     winner_language: str = "python",
 ):
     """Run a shard of E4 manifest ``tasks`` on their cocoex problems, writing one
     COCO outcome JSON per run_id under ``result_dir`` (review P3 sharding).
 
-    Sharding is by the frozen manifest's run_id set only. ``f_opt`` comes from
-    :func:`coco_problem_f_opt`; if it is unavailable and ``require_f_opt`` is
-    set, the task FAILS rather than emit a faked gap (review P3 honesty rule).
+    Sharding is by the frozen manifest's run_id set only.  Each task receives a
+    *fresh* COCO Problem object, because COCO stores mutable evaluation/best
+    state on a Problem. ``f_opt`` is optional: supported cocoex versions often
+    expose no auditable optimum, in which case a valid ``coco_native`` outcome
+    is written with no synthetic relative metrics.  ``require_f_opt=True`` is
+    retained for development callers that explicitly require derived metrics.
     ``winner_language`` sets the R-01 marker: a Python winner is the frozen
     winner's own validation; any other language is only a python_port_external
     check (its main claim must not rest on E4/E5). Returns a per-run_id status
@@ -414,18 +438,16 @@ def dispatch_e4_tasks(
     """
     is_frozen = winner_language == "python"
     external_check_kind = "frozen_winner" if is_frozen else "python_port_external"
-    problems = match_manifest_to_coco_problems(
-        tasks, suite_obj, instance_offset=instance_offset)
     statuses: dict[str, str] = {}
     for task in tasks:
         run_id = task["run_id"]
-        problem = problems[run_id]
         try:
+            problem = fresh_coco_problem(suite_obj, task, instance_offset=instance_offset)
             f_opt = coco_problem_f_opt(problem)
             if require_f_opt and f_opt is None:
                 raise ValueError("cocoex problem exposes no known f_opt; refusing to fake")
             run_e4_coco_task(
-                task, problem, f_opt=(0.0 if f_opt is None else f_opt),
+                task, problem, f_opt=f_opt,
                 result_dir=result_dir, machine_id=machine_id, git_commit=git_commit,
                 environment_hash=environment_hash, suite=suite,
                 n_starts=task.get("n_starts"),
@@ -441,7 +463,7 @@ def run_e4_coco_task(
     task: dict,
     problem,
     *,
-    f_opt: float,
+    f_opt: float | None,
     result_dir,
     machine_id: str = "",
     git_commit: str = "",
@@ -457,9 +479,10 @@ def run_e4_coco_task(
 
     The COCO-native fields (best_observed_fvalue1, evaluations,
     final_target_hit, problem id, f_opt) are preserved verbatim and the
-    synthetic-style normalized_gap / target_hit_fe / anytime are DERIVED from
-    the recorded best-so-far trace (same relative convention as the synthetic
-    contract). ``ran_language`` / ``is_frozen_winner_validation`` /
+    Synthetic-style normalized_gap / target_hit_fe are derived only if the
+    caller provides an auditable ``f_opt`` *and* a frozen shared initial
+    reference. This runner never invents either from an algorithm's trace, so
+    the usual COCO path is native-only. ``ran_language`` / ``is_frozen_winner_validation`` /
     ``external_check_kind`` carry the R-01 frozen-winner-validation marker.
     Requires cocoex at runtime; validated on a cocoex node at P4.
     """
@@ -477,8 +500,6 @@ def run_e4_coco_task(
         result = run_baseline_on_problem(problem, algorithm_name=algorithm_id,
                                          fe_budget=fe_budget, n_starts=starts, seed=seed)
     trace = result.get("best_trace") or []
-    # initial reference = best-so-far at the first evaluation (the starting point)
-    initial_ref = trace[0][1] if trace else float(result["best_observed_fvalue1"])
     cocoex_v, cocopp_v = coco_versions()
     payload = build_coco_outcome(
         task,
@@ -487,7 +508,7 @@ def run_e4_coco_task(
         final_target_hit=result["final_target_hit"],
         best_trace=trace,
         f_opt=f_opt,
-        initial_ref=initial_ref,
+        initial_ref=None,
         fe_budget=fe_budget,
         suite=suite,
         problem_id=coco_problem_id(suite, problem),
@@ -511,5 +532,5 @@ def run_e4_coco_task(
 __all__ = ["problem_seed", "run_on_problem", "run_baseline_on_problem",
            "aggregate_instance_summary", "write_run_provenance",
            "coco_problem_id", "coco_problem_f_opt", "coco_versions",
-           "match_manifest_to_coco_problems", "dispatch_e4_tasks",
+           "match_manifest_to_coco_problems", "fresh_coco_problem", "dispatch_e4_tasks",
            "run_e4_coco_task"]

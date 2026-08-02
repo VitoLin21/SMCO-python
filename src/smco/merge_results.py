@@ -66,7 +66,10 @@ def smco_row_from_outcome(outcome: dict, task: dict, manifest_id: str = "") -> d
         best_value=_num(outcome.get("best_value")),
         fe_used=int(outcome.get("fe_used") or 0),
         status=outcome.get("status", "infra_failure"),
-        known_optimum=_num(outcome.get("known_optimum"), 0.0),
+        # COCO-native outcomes deliberately have no f_opt on cocoex versions
+        # that do not expose one.  Preserve that as NaN in the generic row;
+        # do not silently substitute the synthetic optimum 0.
+        known_optimum=_num(outcome.get("known_optimum")),
         normalized_gap=NONE_TOKEN if gap is None else gap,
         checkpoint_fe=task["fe_budget"],
         target_hit_fe=th,
@@ -118,7 +121,7 @@ def baseline_row_from_outcome(outcome: dict, task: dict, manifest_id: str = "") 
         "fe_used": int(outcome.get("fe_used") or 0),
         "checkpoint_fe": int(task["fe_budget"]),
         "best_value": _num(outcome.get("best_value")),
-        "known_optimum": _num(outcome.get("known_optimum"), 0.0),
+        "known_optimum": _num(outcome.get("known_optimum")),
         "normalized_gap": NONE_TOKEN if gap is None else gap,
         "objective_sense": "minimize",
         "target_hit_fe_1e-1": _th_cell(th, "1e-1"),
@@ -183,11 +186,10 @@ def audit_payloads(rows: list[dict], task_index: dict[str, dict],
                    *, outcome_index: dict[str, dict] | None = None) -> dict:
     """Run the provenance checks; return {passed, failed_checks, checks, n_rows}.
 
-    Synthetic high-dim rows get the 12 synthetic checks. COCO-suite rows
-    (E4/E5 external validation) have no ``start_points_hash``/instance hash, so
-    check 8 is restricted to non-COCO rows and a ``benchmark_provenance`` check
-    validates their COCO benchmark provenance instead — never passing them via
-    empty/None synthetic fields (review P3). ``outcome_index`` (run_id -> raw
+    Every homogeneous suite receives exactly 12 checks. COCO-suite rows
+    (E4/E5 external validation) replace synthetic ``start_points_hash`` check 8
+    with ``benchmark_provenance`` — never passing through empty synthetic
+    fields. ``outcome_index`` (run_id -> raw
     outcome) supplies the benchmark block; it is required when COCO rows exist.
     ``passed=False`` does not crash the merge — the analysis layer refuses to
     build tables when the audit fails.
@@ -245,19 +247,42 @@ def audit_payloads(rows: list[dict], task_index: dict[str, dict],
     checks.append(_check("gap_sanity", rows, not bad_gap,
                          [f"best<optimum: {b}" for b in bad_gap]))
 
-    # 8. start_points_hash consistent within (function,dim,instance,n_starts).
-    # COCO rows have no synthetic starts hash — exclude them (their instance
-    # provenance is the benchmark_provenance check below), so they cannot pass
-    # this synthetic check via empty/None values (review P3).
-    by_inst: dict[tuple, set] = {}
-    for r in non_coco_rows:
-        # n_starts in the key so legitimate E6.1 tiers (same instance, more
-        # starts -> a different starts artifact) are not flagged as a clash.
-        key = (r["function"], int(r["dimension"]), int(r["instance"]), int(r["n_starts"]))
-        by_inst.setdefault(key, set()).add(r.get("start_points_hash"))
-    clash = [f"{k}" for k, v in by_inst.items() if len(v) > 1]
-    checks.append(_check("start_points_hash_consistent", rows, not clash,
-                         [f"instance has multiple starts hashes: {c}" for c in clash]))
+    # 8. Synthetic starts provenance OR COCO benchmark provenance.  This is a
+    # replacement, not an additive 13th check, so canonical merged artifacts
+    # retain one common 12-check contract.
+    if coco_rows and not non_coco_rows:
+        bad_bench: list[str] = []
+        for r in coco_rows:
+            outcome = (outcome_index or {}).get(r["run_id"])
+            if outcome is None:
+                bad_bench.append(f"{r['run_id']}: no raw outcome for benchmark provenance")
+                continue
+            for err in coco_outcome_errors(outcome):
+                bad_bench.append(f"{r['run_id']}: {err}")
+        checks.append(_check("benchmark_provenance", coco_rows, not bad_bench, bad_bench))
+    else:
+        by_inst: dict[tuple, set] = {}
+        for r in non_coco_rows:
+            # n_starts in the key so legitimate E6.1 tiers (same instance, more
+            # starts -> a different starts artifact) are not flagged as a clash.
+            key = (r["function"], int(r["dimension"]), int(r["instance"]), int(r["n_starts"]))
+            by_inst.setdefault(key, set()).add(r.get("start_points_hash"))
+        clash = [f"{k}" for k, v in by_inst.items() if len(v) > 1]
+        checks.append(_check("start_points_hash_consistent", rows, not clash,
+                             [f"instance has multiple starts hashes: {c}" for c in clash]))
+        if coco_rows:
+            # Mixed-suite merges are not canonical, but still cannot evade COCO
+            # provenance validation. Kept separate for diagnostic use only.
+            bad_bench = []
+            for r in coco_rows:
+                outcome = (outcome_index or {}).get(r["run_id"])
+                if outcome is None:
+                    bad_bench.append(f"{r['run_id']}: no raw outcome for benchmark provenance")
+                else:
+                    bad_bench.extend(f"{r['run_id']}: {e}"
+                                     for e in coco_outcome_errors(outcome))
+            checks.append(_check("benchmark_provenance", coco_rows,
+                                 not bad_bench, bad_bench))
 
     # 9. non-EVO rows not duplicated by strategy + identity duplicates
     bad_strategy = [r["run_id"] for r in rows
@@ -301,21 +326,6 @@ def audit_payloads(rows: list[dict], task_index: dict[str, dict],
     checks.append(_check("provenance_complete", rows, not missing_prov,
                          [f"missing provenance (git_commit/environment_hash/machine_id): {m}"
                           for m in missing_prov]))
-
-    # 13 (COCO only, review P3): validate the benchmark provenance of every
-    # COCO-suite row against its raw outcome (problem id, f_opt, native
-    # best/evaluations, cocoex version, code provenance). Present only when COCO
-    # rows exist, so purely synthetic merges keep exactly 12 checks.
-    if coco_rows:
-        bad_bench: list[str] = []
-        for r in coco_rows:
-            outcome = (outcome_index or {}).get(r["run_id"])
-            if outcome is None:
-                bad_bench.append(f"{r['run_id']}: no raw outcome for benchmark provenance")
-                continue
-            for err in coco_outcome_errors(outcome):
-                bad_bench.append(f"{r['run_id']}: {err}")
-        checks.append(_check("benchmark_provenance", coco_rows, not bad_bench, bad_bench))
 
     failed = [c["name"] for c in checks if not c["passed"]]
     return {

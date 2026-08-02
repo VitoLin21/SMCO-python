@@ -132,6 +132,7 @@ def test_audit_recognises_coco_and_validates_benchmark_provenance():
                            outcome_index={task["run_id"]: outcome})
     names = [c["name"] for c in audit["checks"]]
     assert "benchmark_provenance" in names          # COCO check present
+    assert len(audit["checks"]) == 12               # replaces, not adds to, synthetic check 8
     bp = next(c for c in audit["checks"] if c["name"] == "benchmark_provenance")
     assert bp["passed"] is True                      # valid COCO provenance
     assert bp["n"] == 1                              # only COCO rows
@@ -236,8 +237,10 @@ def test_run_e4_coco_task_writes_outcome_with_coco_provenance(tmp_path):
     assert written["benchmark"]["f_opt"] == 0.0
     assert written["benchmark"]["best_observed_fvalue1"] == payload["best_value"]
     assert written["final_target_hit"] is False
-    # derived synthetic-style fields present
-    assert written["normalized_gap"] is not None
+    # No common initial reference is frozen for a COCO task, so it keeps native
+    # metrics rather than inventing an algorithm-specific relative gap.
+    assert written["normalized_gap"] is None
+    assert written["benchmark"]["metric_mode"] == "coco_native"
     assert isinstance(written["anytime"], list) and len(written["anytime"]) >= 1
     # no synthetic instance fields
     assert "instance_artifact_dir" not in written
@@ -312,6 +315,48 @@ def test_dispatch_e4_tasks_runs_shard_and_writes_outcomes(tmp_path):
         suite="bbob-largescale")
     assert statuses[tasks[0]["run_id"]] == "success"
     assert (tmp_path / "raw" / f"{tasks[0]['run_id']}.json").exists()
+
+
+def test_dispatch_gives_each_algorithm_a_fresh_problem_and_native_metrics(tmp_path):
+    """COCO mutable counters/best state must never leak between algorithms."""
+    from smco.coco_runner import dispatch_e4_tasks
+    first = _e4_smco_task(dim=4)
+    second = dict(first, run_id="rE4_002", algorithm_id="PY-BASE-SMCO",
+                  evolutionary="false", state_semantics="none",
+                  evolution_strategy="none", configuration_hash="cfg_base")
+    # The test double has only one problem; dispatch's fallback must clone it.
+    suite = _FakeSuite(_fake_problems_for([first]))
+    statuses = dispatch_e4_tasks(
+        [first, second], suite, result_dir=str(tmp_path / "raw"),
+        machine_id="n", git_commit="c" * 40, environment_hash="eh",
+        suite="bbob-largescale")
+    assert all(v == "success" for v in statuses.values())
+    outcomes = [json.loads((tmp_path / "raw" / f"{t['run_id']}.json").read_text())
+                for t in (first, second)]
+    assert all(o["fe_used"] <= 200 for o in outcomes)
+    assert all(o["benchmark"]["metric_mode"] == "coco_native" for o in outcomes)
+    # A f_opt attribute on the fake is not permission to use a per-algorithm
+    # trace as the common reference.
+    assert all(o["normalized_gap"] is None for o in outcomes)
+
+
+def test_real_coco_problem_without_fopt_writes_native_outcome(tmp_path):
+    """Supported cocoex exposes no f_opt; P4 must still produce an outcome."""
+    cocoex = pytest.importorskip("cocoex")
+    from smco.coco_runner import coco_problem_f_opt, dispatch_e4_tasks
+    task = _e4_smco_task(dim=2)
+    task["fe_budget"] = 25
+    suite = cocoex.Suite("bbob", "instances:1", "dimensions:2")
+    p = suite.get_problem_by_function_dimension_instance(1, 2, 1)
+    assert coco_problem_f_opt(p) is None
+    statuses = dispatch_e4_tasks(
+        [task], suite, result_dir=str(tmp_path / "raw"), machine_id="n",
+        git_commit="c" * 40, environment_hash="eh", suite="bbob")
+    assert statuses[task["run_id"]] == "success"
+    outcome = json.loads((tmp_path / "raw" / f"{task['run_id']}.json").read_text())
+    assert outcome["benchmark"]["f_opt"] is None
+    assert outcome["benchmark"]["metric_mode"] == "coco_native"
+    assert outcome["normalized_gap"] is None
 
 
 def test_coco_outcome_carries_r01_frozen_winner_marker():

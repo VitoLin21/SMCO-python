@@ -4,16 +4,16 @@ E4/E5 run the frozen winner + matched base + baselines on COCO (bbob-largescale 
 bbob) as an **external** benchmark check. Their outcomes are NOT synthetic
 high-dim instances — there is no ``instance_artifact_dir`` / transform hash.
 Instead each task carries **benchmark provenance** (COCO suite, function,
-dimension, instance, problem id, cocoex/cocopp versions, the known ``f_opt``,
-the raw ``best_observed_fvalue1`` and ``evaluations``) plus the COCO-native
+dimension, instance, problem id, cocoex/cocopp versions, the raw
+``best_observed_fvalue1`` and ``evaluations``) plus the COCO-native
 ``final_target_hit`` truth flag.
 
-To flow through the same merge/audit/analysis chain as E1/E2/E3, the outcome also
-derives ``normalized_gap`` and ``target_hit_fe_<tau>`` from the full best-so-far
-trace, using the SAME relative convention as the synthetic contract
-(``f_opt + tau * (initial_ref - f_opt)``). Nothing is faked: the COCO-native
-fields are preserved verbatim and the audit layer explicitly recognises the COCO
-suite and validates benchmark provenance instead of instance hashes.
+COCO's Python API does not expose the per-instance optimum on all supported
+versions.  Therefore synthetic-style relative metrics are derived *only* when
+an auditable optimum and a frozen shared initial reference are both supplied.
+The normal P3.1 path is deliberately ``coco_native``: it preserves the native
+trace/target metrics and leaves ``normalized_gap`` and relative targets empty.
+It must not be sent to the synthetic primary-table analysis.
 """
 from __future__ import annotations
 
@@ -59,8 +59,8 @@ def build_coco_outcome(
     evaluations: int,
     final_target_hit: bool,
     best_trace,
-    f_opt: float,
-    initial_ref: float,
+    f_opt: float | None,
+    initial_ref: float | None,
     fe_budget: int,
     suite: str,
     problem_id: str,
@@ -80,9 +80,9 @@ def build_coco_outcome(
 ) -> dict:
     """Assemble one COCO external-validation task-level outcome payload.
 
-    Preserves the COCO-native fields verbatim and derives the synthetic-style
-    ``normalized_gap`` / ``target_hit_fe_<tau>`` / ``anytime`` from the
-    best-so-far trace so the unified merge/audit/analysis chain can consume it.
+    Preserves COCO-native fields verbatim.  Synthetic-style metrics are emitted
+    only with both ``f_opt`` and a *shared frozen* ``initial_ref``; a per-run
+    trace value is never used as a reference.
 
     R-01 honesty: ``ran_language`` / ``is_frozen_winner_validation`` /
     ``external_check_kind`` record which language actually ran on COCO and
@@ -90,9 +90,14 @@ def build_coco_outcome(
     non-Python frozen winner can only be a "python_port_external" check (its main
     claim must NOT rest on E4/E5) — never a silent language swap.
     """
-    normalized_gap, target_fe = derive_gap_and_targets(
-        best_trace, f_opt=f_opt, initial_ref=initial_ref,
-        fe_budget=fe_budget, targets=targets)
+    derived_available = f_opt is not None and initial_ref is not None
+    if derived_available:
+        normalized_gap, target_fe = derive_gap_and_targets(
+            best_trace, f_opt=float(f_opt), initial_ref=float(initial_ref),
+            fe_budget=fe_budget, targets=targets)
+    else:
+        normalized_gap = None
+        target_fe = {tau: None for tau in targets}
     anytime = [
         {"checkpoint_fe": int(fe), "best_value": float(best)}
         for fe, best in best_trace
@@ -103,7 +108,7 @@ def build_coco_outcome(
         "status": status,
         "failure_reason": failure_reason,
         "best_value": float(best_observed_fvalue1),
-        "known_optimum": float(f_opt),
+        "known_optimum": None if f_opt is None else float(f_opt),
         "normalized_gap": normalized_gap,
         "fe_used": int(evaluations),
         "fe_budget": int(fe_budget),
@@ -120,7 +125,10 @@ def build_coco_outcome(
             "dimension": int(task["dimension"]),
             "instance": int(task["instance"]),
             "problem_id": problem_id,
-            "f_opt": float(f_opt),
+            "f_opt": None if f_opt is None else float(f_opt),
+            "metric_mode": "derived_relative" if derived_available else "coco_native",
+            "shared_initial_reference": (
+                None if initial_ref is None else float(initial_ref)),
             "best_observed_fvalue1": float(best_observed_fvalue1),
             "evaluations": int(evaluations),
             "cocoex_version": cocoex_version,
@@ -159,13 +167,24 @@ def coco_outcome_errors(outcome: dict) -> list[str]:
     if bench is None:
         return ["outcome has no COCO benchmark provenance block"]
     for field in ("suite", "function", "dimension", "instance", "problem_id",
-                  "f_opt", "best_observed_fvalue1", "evaluations", "cocoex_version"):
+                  "f_opt", "metric_mode", "shared_initial_reference",
+                  "best_observed_fvalue1", "evaluations", "cocoex_version"):
         if field not in bench:
             errors.append(f"benchmark provenance missing {field}")
     if bench.get("suite") not in COCO_SUITES:
         errors.append(f"benchmark suite {bench.get('suite')!r} not in {sorted(COCO_SUITES)}")
     if not bench.get("problem_id"):
         errors.append("benchmark problem_id empty")
+    mode = bench.get("metric_mode")
+    if mode not in ("coco_native", "derived_relative"):
+        errors.append(f"benchmark metric_mode {mode!r} invalid")
+    if mode == "coco_native":
+        if outcome.get("normalized_gap") is not None:
+            errors.append("coco_native outcome must not carry normalized_gap")
+        if any(v is not None for v in (outcome.get("target_hit_fe") or {}).values()):
+            errors.append("coco_native outcome must not carry relative target hits")
+    elif bench.get("f_opt") is None or bench.get("shared_initial_reference") is None:
+        errors.append("derived_relative COCO outcome requires f_opt and shared_initial_reference")
     # R-01: the language that ran + frozen-winner-validation status must be
     # explicit (no silent R->Py swap on COCO).
     if "ran_language" not in bench:
