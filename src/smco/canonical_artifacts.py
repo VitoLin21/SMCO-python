@@ -51,7 +51,13 @@ CANONICAL_CONTRACT = {
                               "analysis_kind": "start_count_ablation"},
     "e4_dev": {"kind": "file", "status": "development_only"},
     "e5_dev": {"kind": "file", "status": "development_only"},
-    "e6_schedule": {"kind": "dir", "status": "deferred"},
+    # E6.3 schedule: EXCLUDED (2026-08-02). The manifest is not a real
+    # schedule/elimination ablation (evolution_points/elimination_rate all None),
+    # has no instance semantics, and is d={1000,3000,5000} (prohibitive cost for a
+    # secondary mechanistic analysis). Not regenerated, not rerun. Kept in the
+    # contract as a record that it is deliberately out of the paper. See
+    # docs/smco-evo-e6-schedule-preflight-2026-08-02.md.
+    "e6_schedule": {"kind": "dir", "status": "excluded"},
 }
 
 # Which merged artifact is the E3 comparative analysis input, and which key

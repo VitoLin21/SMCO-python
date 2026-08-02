@@ -1,6 +1,6 @@
 {
   "schema_version": "1",
-  "generated_from_git_commit": "07ae4e05e4a538143c08b11517304ca38b0bbda7",
+  "generated_from_git_commit": "7ab2630c530843701d3c8862387d73e910603ff6",
   "frozen": true,
   "artifacts": [
     {
@@ -155,8 +155,8 @@
       "key": "e6_schedule",
       "path": "result/e6-2026-07-31/schedule",
       "kind": "dir",
-      "status": "deferred"
+      "status": "excluded"
     }
   ],
-  "index_sha256": "a1055714d83e0e5c7f75acda344b1cfcf8ad7f8637500df620c2efd431d45c9b"
+  "index_sha256": "73c6eb047ec3213de23900fa8bb79748c8234fb1b9768c17d96177a8486cbbbd"
 }
