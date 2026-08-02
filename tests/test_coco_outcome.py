@@ -5,6 +5,8 @@ import json
 
 import numpy as np
 
+import pytest
+
 from smco.coco_outcome import (
     COCO_SUITES,
     build_coco_outcome,
@@ -181,6 +183,7 @@ class _FakeProblem:
         self._fe = 0
         self.final_target_hit = False
         self.id = f"fake_f{self.id_function:03d}_i{self.id_instance}_d{dim}"
+        self.f_opt = 0.0  # sphere optimum; exposed so coco_problem_f_opt() resolves it
 
     def __call__(self, x):
         self._fe += 1
@@ -250,3 +253,93 @@ def test_run_e4_coco_task_baseline_path(tmp_path):
     written = json.loads((tmp_path / "raw" / f"{task['run_id']}.json").read_text())
     assert written["benchmark"]["best_observed_fvalue1"] >= 0.0
     assert written["status"] == "success"
+
+
+# --- sharding dispatch (review P3): manifest task -> cocoex problem resolution ---
+
+class _FakeSuite:
+    """Iterates fake problems covering (function, dim, instance) combos."""
+    def __init__(self, problems):
+        self._problems = problems
+    def __iter__(self):
+        return iter(self._problems)
+
+
+def _fake_problems_for(tasks, dim=4):
+    # build one fake problem per (function N, dim, cocoex_instance=manifest_inst+1)
+    probs = []
+    seen = set()
+    for t in tasks:
+        n = int(str(t["function"]).lstrip("fF"))
+        ci = int(t["instance"]) + 1
+        if (n, dim, ci) in seen:
+            continue
+        seen.add((n, dim, ci))
+        p = _FakeProblem(dim)
+        p.id_function = n
+        p.id_instance = ci
+        p.id = f"fake_f{n:03d}_i{ci}_d{dim}"
+        probs.append(p)
+    return probs
+
+
+def test_match_manifest_to_coco_problems_instance_offset():
+    from smco.coco_runner import match_manifest_to_coco_problems
+    tasks = [_e4_smco_task(dim=4), dict(_e4_smco_task(dim=4), run_id="r2", instance=3)]
+    suite = _FakeSuite(_fake_problems_for(tasks))
+    matched = match_manifest_to_coco_problems(tasks, suite)
+    assert set(matched) == {t["run_id"] for t in tasks}
+    # manifest instance 0 -> cocoex instance 1; instance 3 -> cocoex 4
+    assert matched[tasks[0]["run_id"]].id_instance == 1
+    assert matched["r2"].id_instance == 4
+
+
+def test_match_rejects_incomplete_shard():
+    from smco.coco_runner import match_manifest_to_coco_problems
+    task = _e4_smco_task(dim=4)  # instance 0 -> cocoex 1
+    suite = _FakeSuite([])       # no problems at all
+    with pytest.raises(ValueError, match="no cocoex problem"):
+        match_manifest_to_coco_problems([task], suite)
+
+
+def test_dispatch_e4_tasks_runs_shard_and_writes_outcomes(tmp_path):
+    from smco.coco_runner import dispatch_e4_tasks
+    tasks = [_e4_smco_task(dim=4)]
+    suite = _FakeSuite(_fake_problems_for(tasks))
+    statuses = dispatch_e4_tasks(
+        tasks, suite, result_dir=str(tmp_path / "raw"),
+        machine_id="n", git_commit="c" * 40, environment_hash="eh",
+        suite="bbob-largescale")
+    assert statuses[tasks[0]["run_id"]] == "success"
+    assert (tmp_path / "raw" / f"{tasks[0]['run_id']}.json").exists()
+
+
+def test_coco_outcome_carries_r01_frozen_winner_marker():
+    # R-01: the language that ran + frozen-winner-validation status are explicit.
+    task = _task()
+    payload = build_coco_outcome(
+        task, best_observed_fvalue1=1.0, evaluations=10, final_target_hit=True,
+        best_trace=[(1, 1.0)], f_opt=0.0, initial_ref=1.0, fe_budget=100,
+        suite="bbob-largescale", problem_id="p", cocoex_version="x", cocopp_version=None,
+        machine_id="n", git_commit="c" * 40, environment_hash="eh",
+        ran_language="python", is_frozen_winner_validation=True,
+        external_check_kind="frozen_winner")
+    b = payload["benchmark"]
+    assert b["ran_language"] == "python"
+    assert b["is_frozen_winner_validation"] is True
+    assert b["external_check_kind"] == "frozen_winner"
+    assert coco_outcome_errors(payload) == []
+
+
+def test_coco_outcome_rejects_invalid_r01_marker():
+    task = _task()
+    payload = build_coco_outcome(
+        task, best_observed_fvalue1=1.0, evaluations=10, final_target_hit=True,
+        best_trace=[(1, 1.0)], f_opt=0.0, initial_ref=1.0, fe_budget=100,
+        suite="bbob-largescale", problem_id="p", cocoex_version="x", cocopp_version=None,
+        machine_id="n", git_commit="c" * 40, environment_hash="eh",
+        external_check_kind="bogus")            # invalid kind
+    assert any("external_check_kind" in e for e in coco_outcome_errors(payload))
+    # missing marker fields -> rejected
+    payload["benchmark"].pop("ran_language", None)
+    assert any("ran_language" in e for e in coco_outcome_errors(payload))

@@ -74,12 +74,21 @@ def build_coco_outcome(
     wall_time_sec: float = 0.0,
     peak_memory_mb: float = 0.0,
     targets=TARGETS,
+    ran_language: str = "python",
+    is_frozen_winner_validation: bool = True,
+    external_check_kind: str = "frozen_winner",
 ) -> dict:
     """Assemble one COCO external-validation task-level outcome payload.
 
     Preserves the COCO-native fields verbatim and derives the synthetic-style
     ``normalized_gap`` / ``target_hit_fe_<tau>`` / ``anytime`` from the
     best-so-far trace so the unified merge/audit/analysis chain can consume it.
+
+    R-01 honesty: ``ran_language`` / ``is_frozen_winner_validation`` /
+    ``external_check_kind`` record which language actually ran on COCO and
+    whether it is the FROZEN winner's own validation. COCO is Python-only, so a
+    non-Python frozen winner can only be a "python_port_external" check (its main
+    claim must NOT rest on E4/E5) — never a silent language swap.
     """
     normalized_gap, target_fe = derive_gap_and_targets(
         best_trace, f_opt=f_opt, initial_ref=initial_ref,
@@ -116,6 +125,11 @@ def build_coco_outcome(
             "evaluations": int(evaluations),
             "cocoex_version": cocoex_version,
             "cocopp_version": cocopp_version,
+            # R-01: which language ran + whether it is the frozen winner's own
+            # validation (a non-Python winner is only a python_port_external).
+            "ran_language": ran_language,
+            "is_frozen_winner_validation": bool(is_frozen_winner_validation),
+            "external_check_kind": external_check_kind,
         },
         "machine_id": machine_id,
         "git_commit": git_commit,
@@ -152,6 +166,15 @@ def coco_outcome_errors(outcome: dict) -> list[str]:
         errors.append(f"benchmark suite {bench.get('suite')!r} not in {sorted(COCO_SUITES)}")
     if not bench.get("problem_id"):
         errors.append("benchmark problem_id empty")
+    # R-01: the language that ran + frozen-winner-validation status must be
+    # explicit (no silent R->Py swap on COCO).
+    if "ran_language" not in bench:
+        errors.append("benchmark missing ran_language")
+    if "is_frozen_winner_validation" not in bench:
+        errors.append("benchmark missing is_frozen_winner_validation")
+    if bench.get("external_check_kind") not in ("frozen_winner", "python_port_external"):
+        errors.append(
+            f"benchmark external_check_kind {bench.get('external_check_kind')!r} invalid")
     if not outcome.get("git_commit") or not outcome.get("environment_hash") \
             or not outcome.get("machine_id"):
         errors.append("outcome missing machine_id/git_commit/environment_hash provenance")

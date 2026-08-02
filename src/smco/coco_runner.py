@@ -399,6 +399,7 @@ def dispatch_e4_tasks(
     suite: str = "bbob-largescale",
     instance_offset: int = 1,
     require_f_opt: bool = True,
+    winner_language: str = "python",
 ):
     """Run a shard of E4 manifest ``tasks`` on their cocoex problems, writing one
     COCO outcome JSON per run_id under ``result_dir`` (review P3 sharding).
@@ -406,8 +407,13 @@ def dispatch_e4_tasks(
     Sharding is by the frozen manifest's run_id set only. ``f_opt`` comes from
     :func:`coco_problem_f_opt`; if it is unavailable and ``require_f_opt`` is
     set, the task FAILS rather than emit a faked gap (review P3 honesty rule).
-    Returns a per-run_id status dict. Requires cocoex at runtime (P4).
+    ``winner_language`` sets the R-01 marker: a Python winner is the frozen
+    winner's own validation; any other language is only a python_port_external
+    check (its main claim must not rest on E4/E5). Returns a per-run_id status
+    dict. Requires cocoex at runtime (P4).
     """
+    is_frozen = winner_language == "python"
+    external_check_kind = "frozen_winner" if is_frozen else "python_port_external"
     problems = match_manifest_to_coco_problems(
         tasks, suite_obj, instance_offset=instance_offset)
     statuses: dict[str, str] = {}
@@ -422,7 +428,9 @@ def dispatch_e4_tasks(
                 task, problem, f_opt=(0.0 if f_opt is None else f_opt),
                 result_dir=result_dir, machine_id=machine_id, git_commit=git_commit,
                 environment_hash=environment_hash, suite=suite,
-                n_starts=task.get("n_starts"))
+                n_starts=task.get("n_starts"),
+                ran_language="python", is_frozen_winner_validation=is_frozen,
+                external_check_kind=external_check_kind)
             statuses[run_id] = "success"
         except Exception as exc:  # noqa: BLE001 — record, don't abort the shard
             statuses[run_id] = f"failed: {type(exc).__name__}: {exc}"
@@ -440,6 +448,9 @@ def run_e4_coco_task(
     environment_hash: str = "",
     suite: str = "bbob-largescale",
     n_starts: int | None = None,
+    ran_language: str = "python",
+    is_frozen_winner_validation: bool = True,
+    external_check_kind: str = "frozen_winner",
 ):
     """Run one E4 manifest task on a cocoex problem and atomically write its
     task-level COCO outcome JSON (``<result_dir>/<run_id>.json``).
@@ -448,7 +459,9 @@ def run_e4_coco_task(
     final_target_hit, problem id, f_opt) are preserved verbatim and the
     synthetic-style normalized_gap / target_hit_fe / anytime are DERIVED from
     the recorded best-so-far trace (same relative convention as the synthetic
-    contract). Requires cocoex at runtime; validated on a cocoex node at P4.
+    contract). ``ran_language`` / ``is_frozen_winner_validation`` /
+    ``external_check_kind`` carry the R-01 frozen-winner-validation marker.
+    Requires cocoex at runtime; validated on a cocoex node at P4.
     """
     from .coco_outcome import build_coco_outcome
 
@@ -483,6 +496,9 @@ def run_e4_coco_task(
         machine_id=machine_id,
         git_commit=git_commit,
         environment_hash=environment_hash,
+        ran_language=ran_language,
+        is_frozen_winner_validation=is_frozen_winner_validation,
+        external_check_kind=external_check_kind,
     )
     out_dir = Path(result_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
