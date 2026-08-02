@@ -10,6 +10,8 @@ final_target_hit, evaluations). See
 from __future__ import annotations
 
 import hashlib
+import json
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -85,6 +87,8 @@ class _CocoMinObserver:
         self.problem = problem
         self.max_evals = int(max_evals)
         self.fe = 0
+        self.best_min = float("inf")
+        self.trace: list[tuple[int, float]] = []  # (fe, best_min_so_far) for E4 P3
 
     def __call__(self, x):
         if self.fe >= self.max_evals:
@@ -98,6 +102,9 @@ class _CocoMinObserver:
         v = float(self.problem(x))
         if not np.isfinite(v):
             return 1e10
+        if v < self.best_min:
+            self.best_min = v
+            self.trace.append((self.fe, self.best_min))
         return v
 
 
@@ -143,6 +150,7 @@ def run_baseline_on_problem(
         "best_observed_fvalue1": float(problem.best_observed_fvalue1),
         "final_target_hit": bool(problem.final_target_hit),
         "evaluations": int(problem.evaluations),
+        "best_trace": observer_obj.trace,  # E4 P3: minimisation best-so-f trace
     }
 
 
@@ -193,6 +201,9 @@ def run_on_problem(
 
     lower = problem.lower_bounds
     upper = problem.upper_bounds
+    best_min = {"v": float("inf")}  # closure for the minimisation best-so-far
+    trace: list[tuple[int, float]] = []
+    fe_counter = {"n": 0}
 
     def objective(x):
         # Clip probe points to the cocoex bounds (cocoex extrapolates outside)
@@ -204,6 +215,10 @@ def run_on_problem(
         v = float(problem(x))
         if not np.isfinite(v):
             return -1e10
+        fe_counter["n"] += 1
+        if v < best_min["v"]:
+            best_min["v"] = v
+            trace.append((fe_counter["n"], v))
         return -v
 
     algorithm(objective, lower, upper, starts, **control)
@@ -216,6 +231,7 @@ def run_on_problem(
         "best_observed_fvalue1": float(problem.best_observed_fvalue1),
         "final_target_hit": bool(problem.final_target_hit),
         "evaluations": int(problem.evaluations),
+        "best_trace": trace,  # E4 P3: minimisation best-so-f for derived gap/targets
     }
 
 
@@ -308,5 +324,107 @@ def write_run_provenance(result_dir, *, kind, algorithms, winner=None, base=None
     (out / "provenance.json").write_text(_json.dumps(info, indent=2))
 
 
+# --- E4 P3: task-level COCO outcome (one JSON per run_id) ---
+
+def coco_problem_id(suite, problem) -> str:
+    """Stable problem id, e.g. ``bbob-largescale_f001_i1_d160``."""
+    return (f"{suite}_f{int(problem.id_function):03d}"
+            f"_i{int(problem.id_instance)}_d{int(problem.dimension)}")
+
+
+def coco_problem_f_opt(problem):
+    """Best-effort extraction of a cocoex problem's known optimum value.
+
+    cocoex does not expose the per-instance optimum scalar uniformly across
+    versions; try the common attributes. Returns None if unknown (the caller
+    must then refuse to emit a faked gap — review P3 honesty rule).
+    """
+    for attr in ("optimality_table", "optimal_fvalue", "f_opt"):
+        value = getattr(problem, attr, None)
+        if isinstance(value, (int, float)):
+            return float(value)
+    return None
+
+
+def coco_versions():
+    """Return (cocoex_version, cocopp_version_or_None) for benchmark provenance."""
+    try:
+        import cocoex  # noqa: F401
+        cocoex_v = getattr(cocoex, "__version__", "unknown")
+    except Exception:
+        cocoex_v = "unknown"
+    try:
+        import cocopp  # noqa: F401
+        cocopp_v = getattr(cocopp, "__version__", None)
+    except Exception:
+        cocopp_v = None
+    return cocoex_v, cocopp_v
+
+
+def run_e4_coco_task(
+    task: dict,
+    problem,
+    *,
+    f_opt: float,
+    result_dir,
+    machine_id: str = "",
+    git_commit: str = "",
+    environment_hash: str = "",
+    suite: str = "bbob-largescale",
+    n_starts: int | None = None,
+):
+    """Run one E4 manifest task on a cocoex problem and atomically write its
+    task-level COCO outcome JSON (``<result_dir>/<run_id>.json``).
+
+    The COCO-native fields (best_observed_fvalue1, evaluations,
+    final_target_hit, problem id, f_opt) are preserved verbatim and the
+    synthetic-style normalized_gap / target_hit_fe / anytime are DERIVED from
+    the recorded best-so-far trace (same relative convention as the synthetic
+    contract). Requires cocoex at runtime; validated on a cocoex node at P4.
+    """
+    from .coco_outcome import build_coco_outcome
+
+    fe_budget = int(task["fe_budget"])
+    starts = int(n_starts if n_starts is not None else task.get("n_starts", 8))
+    seed = int(task.get("seed")) if task.get("seed") is not None else None
+    algorithm_id = task.get("algorithm_id") or task.get("algorithm")
+    is_smco = "configuration_hash" in task
+    if is_smco:
+        result = run_on_problem(problem, algorithm_id=algorithm_id,
+                                fe_budget=fe_budget, n_starts=starts, seed=seed)
+    else:
+        result = run_baseline_on_problem(problem, algorithm_name=algorithm_id,
+                                         fe_budget=fe_budget, n_starts=starts, seed=seed)
+    trace = result.get("best_trace") or []
+    # initial reference = best-so-far at the first evaluation (the starting point)
+    initial_ref = trace[0][1] if trace else float(result["best_observed_fvalue1"])
+    cocoex_v, cocopp_v = coco_versions()
+    payload = build_coco_outcome(
+        task,
+        best_observed_fvalue1=result["best_observed_fvalue1"],
+        evaluations=result["evaluations"],
+        final_target_hit=result["final_target_hit"],
+        best_trace=trace,
+        f_opt=f_opt,
+        initial_ref=initial_ref,
+        fe_budget=fe_budget,
+        suite=suite,
+        problem_id=coco_problem_id(suite, problem),
+        cocoex_version=cocoex_v,
+        cocopp_version=cocopp_v,
+        machine_id=machine_id,
+        git_commit=git_commit,
+        environment_hash=environment_hash,
+    )
+    out_dir = Path(result_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    tmp = out_dir / f"{task['run_id']}.json.tmp"
+    tmp.write_text(json.dumps(payload, indent=2))
+    tmp.replace(out_dir / f"{task['run_id']}.json")
+    return payload
+
+
 __all__ = ["problem_seed", "run_on_problem", "run_baseline_on_problem",
-           "aggregate_instance_summary", "write_run_provenance"]
+           "aggregate_instance_summary", "write_run_provenance",
+           "coco_problem_id", "coco_problem_f_opt", "coco_versions",
+           "run_e4_coco_task"]

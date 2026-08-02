@@ -1,6 +1,10 @@
 """Tests for the COCO external-validation task-level outcome (review §9 P3)."""
 from __future__ import annotations
 
+import json
+
+import numpy as np
+
 from smco.coco_outcome import (
     COCO_SUITES,
     build_coco_outcome,
@@ -160,3 +164,89 @@ def test_synthetic_merge_keeps_exactly_12_checks():
     audit = audit_payloads([row], {task["run_id"]: task})
     assert len(audit["checks"]) == 12
     assert all(c["name"] != "benchmark_provenance" for c in audit["checks"])
+
+
+# --- run_e4_coco_task end-to-end on a fake cocoex problem (review P3) ---
+
+class _FakeProblem:
+    """Minimal cocoex-problem stand-in: a d-sphere with optimum 0 at x=0."""
+    id_function = 1
+    id_instance = 1
+
+    def __init__(self, dim):
+        self.dimension = dim
+        self.lower_bounds = np.full(dim, -5.0)
+        self.upper_bounds = np.full(dim, 5.0)
+        self._best = float("inf")
+        self._fe = 0
+        self.final_target_hit = False
+        self.id = f"fake_f{self.id_function:03d}_i{self.id_instance}_d{dim}"
+
+    def __call__(self, x):
+        self._fe += 1
+        v = float(np.sum(np.asarray(x, dtype=float) ** 2))
+        if v < self._best:
+            self._best = v
+        return v
+
+    @property
+    def best_observed_fvalue1(self):
+        return self._best
+
+    @property
+    def evaluations(self):
+        return self._fe
+
+
+def _e4_smco_task(dim=4):
+    from smco.experiment_manifests import derive_seed
+    t = _e4_task()
+    t["dimension"] = dim
+    t["fe_budget"] = 200
+    t["seed"] = derive_seed("e4_bbob_largescale", "bbob-largescale", "f1", dim, 0, 0, "PY-SP-SMCO-EVO")
+    return t
+
+
+def test_run_on_problem_records_best_trace():
+    from smco.coco_runner import run_on_problem
+    res = run_on_problem(_FakeProblem(4), algorithm_id="PY-SP-SMCO-EVO",
+                         fe_budget=80, n_starts=4)
+    assert "best_trace" in res
+    assert all(b >= 0.0 for _, b in res["best_trace"])
+    assert res["evaluations"] > 0
+
+
+def test_run_e4_coco_task_writes_outcome_with_coco_provenance(tmp_path):
+    from smco.coco_runner import coco_problem_id, run_e4_coco_task
+    task = _e4_smco_task(dim=4)
+    problem = _FakeProblem(4)
+    payload = run_e4_coco_task(
+        task, problem, f_opt=0.0, result_dir=str(tmp_path / "raw"),
+        machine_id="node213", git_commit="c" * 40, environment_hash="eh",
+        suite="bbob-largescale", n_starts=4)
+    # JSON written
+    written = json.loads((tmp_path / "raw" / f"{task['run_id']}.json").read_text())
+    assert written["run_id"] == task["run_id"]
+    # COCO-native + benchmark provenance
+    assert written["benchmark"]["suite"] == "bbob-largescale"
+    assert written["benchmark"]["problem_id"] == coco_problem_id("bbob-largescale", problem)
+    assert written["benchmark"]["f_opt"] == 0.0
+    assert written["benchmark"]["best_observed_fvalue1"] == payload["best_value"]
+    assert written["final_target_hit"] is False
+    # derived synthetic-style fields present
+    assert written["normalized_gap"] is not None
+    assert isinstance(written["anytime"], list) and len(written["anytime"]) >= 1
+    # no synthetic instance fields
+    assert "instance_artifact_dir" not in written
+
+
+def test_run_e4_coco_task_baseline_path(tmp_path):
+    from smco.coco_runner import run_e4_coco_task
+    task = _e4_smco_task(dim=4)
+    task.pop("configuration_hash")           # -> baseline classification
+    task["algorithm_id"] = "DE"
+    run_e4_coco_task(task, _FakeProblem(4), f_opt=0.0, result_dir=str(tmp_path / "raw"),
+                     machine_id="n", git_commit="c" * 40, environment_hash="eh", n_starts=4)
+    written = json.loads((tmp_path / "raw" / f"{task['run_id']}.json").read_text())
+    assert written["benchmark"]["best_observed_fvalue1"] >= 0.0
+    assert written["status"] == "success"
