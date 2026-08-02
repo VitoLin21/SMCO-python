@@ -151,6 +151,8 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--selection-only", action="store_true", help="Run only the selection step.")
     parser.add_argument("--statistics", action="store_true", help="Compute the Task-12 primary table from merged/ (audit must pass).")
+    parser.add_argument("--figures", action="store_true",
+                        help="With --statistics: also render COCO-style ECDF figures (comparative/selection_matrix).")
     parser.add_argument("--dry-run", action="store_true", help="No results needed; report rules + candidates.")
     parser.add_argument("--development", action="store_true", help="Allow raw --result-dir JSON (development only).")
     parser.add_argument(
@@ -182,6 +184,10 @@ def main(argv=None) -> int:
         if analysis_kind == "comparative":
             pairs = write_pairwise_table(merged_dir, args.out_dir, algos)
             print(f"wrote {args.out_dir}/pairwise_table.csv ({len(pairs)} pairs)")
+        if args.figures and analysis_kind in {"comparative", "selection_matrix"}:
+            from smco.paper_figures import write_ecdf_figures
+            paths = write_ecdf_figures(merged_dir, args.out_dir, algos)
+            print(f"wrote {len(paths)} ECDF figures under {args.out_dir}")
         return 0
 
     if not args.selection_only:
