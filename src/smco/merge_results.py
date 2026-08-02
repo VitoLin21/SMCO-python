@@ -16,6 +16,7 @@ from typing import Iterable
 from .experiment_manifests import (
     derive_seed,
     load_manifest,
+    manifest_sha256,
     result_row_from_task,
     verify_manifest,
 )
@@ -358,6 +359,42 @@ def _write_csv(path: Path, columns, rows):
             writer.writerow({c: row.get(c, "") for c in columns})
 
 
+_COCO_NATIVE_COLUMNS = (
+    "run_id", "algorithm_id", "function", "dimension", "instance", "status",
+    "fe_used", "fe_budget", "final_target_hit", "best_observed_fvalue1",
+    "evaluations", "suite", "problem_id", "metric_mode", "cocoex_version",
+    "cocopp_version", "ran_language", "is_frozen_winner_validation",
+    "external_check_kind",
+)
+
+
+def _coco_native_row(row: dict, outcome: dict) -> dict | None:
+    """Project COCO-only, native metrics into an auditable analysis sidecar.
+
+    ``RESULT_COLUMNS`` intentionally remains the common synthetic contract and
+    cannot represent COCO's official target flag/provenance.  This sidecar is
+    written only for COCO outcomes and is the sole input to the external COCO
+    analysis route.
+    """
+    bench = outcome.get("benchmark")
+    if not isinstance(bench, dict) or bench.get("kind") != "coco":
+        return None
+    return {
+        "run_id": row["run_id"], "algorithm_id": row["algorithm_id"],
+        "function": row["function"], "dimension": row["dimension"],
+        "instance": row["instance"], "status": row["status"],
+        "fe_used": row["fe_used"], "fe_budget": row["fe_budget"],
+        "final_target_hit": bench.get("final_target_hit", outcome.get("final_target_hit")),
+        "best_observed_fvalue1": bench.get("best_observed_fvalue1"),
+        "evaluations": bench.get("evaluations"), "suite": bench.get("suite"),
+        "problem_id": bench.get("problem_id"), "metric_mode": bench.get("metric_mode"),
+        "cocoex_version": bench.get("cocoex_version"), "cocopp_version": bench.get("cocopp_version"),
+        "ran_language": bench.get("ran_language"),
+        "is_frozen_winner_validation": bench.get("is_frozen_winner_validation"),
+        "external_check_kind": bench.get("external_check_kind"),
+    }
+
+
 def _audit_md(audit: dict) -> str:
     lines = ["# Provenance Audit", "",
              f"**Passed:** {audit['passed']}", f"**Rows:** {audit['n_rows']}", ""]
@@ -373,7 +410,9 @@ def merge(manifest_paths, raw_dirs, merged_dir) -> dict:
     """Load outcomes, build rows, resolve supersedes, audit, write merged/."""
     merged_dir = Path(merged_dir)
     merged_dir.mkdir(parents=True, exist_ok=True)
+    manifest_paths = list(manifest_paths)
     task_index = build_task_index(manifest_paths)
+    manifests = [load_manifest(path) for path in manifest_paths]
 
     attempts: list[dict] = []
     outcome_index: dict[str, dict] = {}
@@ -396,6 +435,12 @@ def merge(manifest_paths, raw_dirs, merged_dir) -> dict:
 
     valid, superseded = resolve_supersedes(attempts)
     audit = audit_payloads(attempts, task_index, outcome_index=outcome_index)
+    # Bind an audit to the exact frozen manifest(s) that were used to construct
+    # its task index.  External COCO canonicalization requires exactly one of
+    # these hashes, preventing an audit from being paired with another manifest.
+    audit["manifest_sha256s"] = [manifest_sha256(manifest) for manifest in manifests]
+    if len(manifests) == 1:
+        audit["manifest_sha256"] = audit["manifest_sha256s"][0]
 
     # missing = manifest tasks with no raw outcome
     have = {r["run_id"] for r in attempts}
@@ -424,6 +469,11 @@ def merge(manifest_paths, raw_dirs, merged_dir) -> dict:
                [r for r in attempts if r["run_id"] in superseded])
     _write_csv(merged_dir / "anytime.csv",
                ("run_id", "checkpoint_fe", "fe_used", "best_value", "normalized_gap"), anytime_rows)
+    valid_by_id = {row["run_id"]: row for row in valid}
+    native_rows = [native for run_id, row in valid_by_id.items()
+                   if (native := _coco_native_row(row, outcome_index.get(run_id, {}))) is not None]
+    if native_rows:
+        _write_csv(merged_dir / "coco_native_runs.csv", _COCO_NATIVE_COLUMNS, native_rows)
     (merged_dir / "provenance_audit.json").write_text(json.dumps(audit, indent=2))
     (merged_dir / "provenance_audit.md").write_text(_audit_md(audit))
 
