@@ -26,11 +26,16 @@ from smco.highdim_instances import (
     instance_seed,
     load_instance,
     load_starts,
+    known_functions,
     write_instance_artifacts,
 )
 
-# Base functions used in E1 (Michalewicz replaced by Zakharov, 2026-07-29).
-INSTANCE_FUNCTIONS = ["Rastrigin", "Ackley", "Griewank", "Zakharov"]
+# E1 is frozen to its first four functions.  E3-F/E7 add the remaining four
+# entries below without modifying that historical grid.
+INSTANCE_FUNCTIONS = [
+    "Rastrigin", "Ackley", "Griewank", "Zakharov",
+    "Rosenbrock", "Levy", "Schwefel226", "HighConditionedEllipsoid",
+]
 # Minimization global optimum of each base function (transform preserves it).
 BASE_OPTIMUM = {
     "Rastrigin": 0.0,
@@ -38,6 +43,9 @@ BASE_OPTIMUM = {
     "Griewank": 0.0,
     "Zakharov": 0.0,
     "Rosenbrock": 0.0,
+    "Levy": 0.0,
+    "Schwefel226": 0.0,
+    "HighConditionedEllipsoid": 0.0,
 }
 
 
@@ -67,6 +75,22 @@ def test_objective_at_optimum_beats_random_point():
     x_rand = inst.bounds_lower + rng.uniform(size=10) * span
     # Minimization: the optimum must be no worse than a random feasible point.
     assert inst.objective(inst.known_optimum_x) <= inst.objective(x_rand) + 1e-9
+
+
+@pytest.mark.parametrize("function_name", INSTANCE_FUNCTIONS)
+def test_all_highdim_functions_are_finite_at_boundaries_and_random_point(function_name):
+    inst = generate_instance(function_name, dimension=240, instance_id=1, seed=15)
+    rng = np.random.default_rng(16)
+    random_point = inst.bounds_lower + rng.uniform(size=inst.dimension) * (
+        inst.bounds_upper - inst.bounds_lower
+    )
+
+    for point in (inst.bounds_lower, inst.bounds_upper, random_point):
+        assert np.isfinite(inst.objective(point))
+
+
+def test_highdim_registry_matches_the_eight_function_extension_grid():
+    assert known_functions() == tuple(INSTANCE_FUNCTIONS)
 
 
 def test_same_seed_same_transform_hash():
@@ -141,15 +165,42 @@ def test_artifact_load_reproduces_objective(tmp_path):
     assert np.allclose(load_starts(tmp_path), starts)
 
 
-def test_d5000_does_not_allocate_dense_matrix():
-    # Scenario 8: a 5000-D instance is built without a dense d x d matrix and
-    # still evaluates correctly at its optimum.
-    inst = generate_instance("Ackley", dimension=5000, instance_id=0, seed=2)
+def test_d10000_does_not_allocate_dense_matrix_and_is_finite_at_domain_points():
+    # Scenario 8: d=10000 must use fixed-size blocks rather than a dense
+    # matrix, and all prescribed evaluation points remain finite.
+    inst = generate_instance("HighConditionedEllipsoid", dimension=10_000, instance_id=0, seed=2)
     blocks = inst.transform_spec.rotation_blocks
     total = sum(b.size for b in blocks)
-    assert total < 5000 * 5000
+    assert total < 10_000 * 10_000
+    assert total * 8 < 10 * 1024 * 1024
     assert all(b.shape[0] <= DEFAULT_BLOCK_SIZE for b in blocks)
-    assert np.isclose(inst.objective(inst.known_optimum_x), inst.known_optimum_value, atol=1e-8)
+    midpoint = (inst.bounds_lower + inst.bounds_upper) / 2.0
+    random_point = inst.bounds_lower + np.random.default_rng(3).uniform(size=inst.dimension) * (
+        inst.bounds_upper - inst.bounds_lower
+    )
+    for point in (inst.known_optimum_x, inst.bounds_lower, inst.bounds_upper, midpoint, random_point):
+        assert np.isfinite(inst.objective(point))
+    assert inst.objective(inst.known_optimum_x) == 0.0
+
+
+@pytest.mark.parametrize("function_name", ["Levy", "Schwefel226", "HighConditionedEllipsoid"])
+def test_new_functions_replay_hash_and_transformed_optimum(function_name):
+    a = generate_instance(function_name, dimension=240, instance_id=2, stage="e3f")
+    b = generate_instance(function_name, dimension=240, instance_id=2, stage="e3f")
+
+    assert a.transform_spec.rotation_mode == "block"
+    assert a.transform_spec.sha256() == b.transform_spec.sha256()
+    assert a.objective(a.known_optimum_x) == 0.0
+
+
+def test_block_size_is_part_of_the_replay_hash():
+    a = generate_instance("Levy", dimension=240, instance_id=2, seed=4, block_size=40)
+    b = generate_instance("Levy", dimension=240, instance_id=2, seed=4, block_size=60)
+
+    assert a.transform_spec.rotation_mode == b.transform_spec.rotation_mode == "block"
+    assert a.transform_spec.block_size == 40
+    assert b.transform_spec.block_size == 60
+    assert a.transform_spec.sha256() != b.transform_spec.sha256()
 
 
 def test_dev_and_confirmatory_namespaces_do_not_overlap():

@@ -7,9 +7,13 @@ from smco import BenchmarkConfig, assign_config
 from smco.test_functions import (
     ackley,
     griewank,
+    high_conditioned_ellipsoid,
+    levy,
     negative_squared_norm,
     rastrigin,
     rosenbrock,
+    schwefel_226,
+    SCHWEFEL_226_OPTIMUM_X,
     squared_norm,
 )
 
@@ -29,6 +33,8 @@ from smco.test_functions import (
             - math.cos(1.0) * math.cos(1.0 / math.sqrt(2.0)) * math.cos(1.0 / math.sqrt(3.0)),
         ),
         (rosenbrock, 2.0, 0.0),
+        (levy, levy(np.zeros(3)), 0.0),
+        (high_conditioned_ellipsoid, 0.0, 1_001_001.0),
     ],
 )
 def test_benchmark_functions_have_known_values_at_zeros_and_ones(func, zero_value, one_value):
@@ -114,6 +120,40 @@ def test_assign_config_supports_common_minimization_benchmarks_case_insensitivel
 def test_assign_config_rejects_unknown_benchmark_name():
     with pytest.raises(ValueError, match="Unknown benchmark"):
         assign_config("not-a-benchmark", 2)
+
+
+@pytest.mark.parametrize(
+    ("name", "lower", "upper", "optimum"),
+    [
+        ("Levy", -10.0, 10.0, np.ones(7)),
+        ("Schwefel 2.26", -500.0, 500.0, np.full(7, SCHWEFEL_226_OPTIMUM_X)),
+        ("High-conditioned Ellipsoid", -5.0, 5.0, np.zeros(7)),
+    ],
+)
+def test_new_scalable_benchmarks_have_exact_zero_known_minimum(name, lower, upper, optimum):
+    config = assign_config(name, 7)
+
+    assert np.all(config.bounds_lower == lower)
+    assert np.all(config.bounds_upper == upper)
+    assert config.known_best_value == 0.0
+    assert config.known_best_objective == 0.0
+    assert config.known_best_x is not None
+    assert np.array_equal(config.known_best_x, optimum)
+    assert config.f(optimum) == 0.0
+
+
+def test_schwefel_226_is_shifted_to_exact_zero_at_analytic_optimum():
+    optimum = np.full(10_000, SCHWEFEL_226_OPTIMUM_X)
+
+    assert schwefel_226(optimum) == 0.0
+
+
+def test_high_conditioned_ellipsoid_has_fixed_one_million_condition_number():
+    x = np.ones(10_000)
+    value = high_conditioned_ellipsoid(x)
+
+    assert value == pytest.approx(np.sum(10.0 ** (6.0 * np.arange(10_000) / 9_999)))
+    assert np.isfinite(value)
 
 
 @pytest.mark.parametrize("name", ["Rastrigin", "DropWave"])

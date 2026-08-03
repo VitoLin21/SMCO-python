@@ -54,6 +54,13 @@ E1_DIMENSIONS = (200, 500, 1000)
 E1_N_INSTANCES = 5
 E1_TASKS_PER_CANDIDATE = len(E1_FUNCTIONS) * len(E1_DIMENSIONS) * E1_N_INSTANCES  # 60
 
+# E3-F/E7 are prospective extensions.  Keep them separate from E1_FUNCTIONS:
+# altering the latter would retroactively change frozen E1/E2 contracts.
+E3F_FUNCTIONS = (
+    "Rosenbrock", "Levy", "Schwefel226", "HighConditionedEllipsoid",
+)
+E7_FUNCTIONS = E1_FUNCTIONS + E3F_FUNCTIONS
+
 
 def build_algorithm_config(
     language: str,
@@ -536,6 +543,8 @@ __all__ = [
     "build_algorithm_config",
     "e1_algorithm_configs",
     "E1_FUNCTIONS",
+    "E3F_FUNCTIONS",
+    "E7_FUNCTIONS",
     "E1_DIMENSIONS",
     "E1_N_INSTANCES",
     "E1_TASKS_PER_CANDIDATE",

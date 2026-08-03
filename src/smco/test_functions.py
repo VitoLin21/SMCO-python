@@ -82,6 +82,53 @@ def rosenbrock(x: np.ndarray) -> float:
     return float(np.sum(100.0 * (x[1:] - x[:-1] ** 2) ** 2 + (1.0 - x[:-1]) ** 2))
 
 
+def levy(x: np.ndarray) -> float:
+    """Levy's scalable minimization benchmark with ``f(1, ..., 1) = 0``."""
+    x = np.asarray(x, dtype=float)
+    if x.size == 0:
+        return 0.0
+    w = 1.0 + (x - 1.0) / 4.0
+    middle = np.sum(
+        (w[:-1] - 1.0) ** 2 * (1.0 + 10.0 * np.sin(np.pi * w[:-1] + 1.0) ** 2)
+    )
+    last = (w[-1] - 1.0) ** 2 * (1.0 + np.sin(2.0 * np.pi * w[-1]) ** 2)
+    # Subtracting one is analytically equivalent, and gives the exact
+    # floating-point zero at the documented all-ones minimizer.
+    return float(np.sin(np.pi * (w[0] - 1.0)) ** 2 + middle + last)
+
+
+# The standard Schwefel 2.26 reference value (418.9829 * d) is rounded, so
+# it does not make the documented analytic minimizer evaluate to exactly zero.
+# Subtracting the per-coordinate value at this full-precision minimizer does.
+SCHWEFEL_226_OPTIMUM_X = 420.9687462275036
+_SCHWEFEL_226_OPTIMUM_TERM = SCHWEFEL_226_OPTIMUM_X * np.sin(
+    np.sqrt(SCHWEFEL_226_OPTIMUM_X)
+)
+
+
+def schwefel_226(x: np.ndarray) -> float:
+    """Shifted Schwefel 2.26 with exact floating-point minimum ``0``.
+
+    The computation is a sum of per-coordinate differences rather than
+    ``constant * d - sum(...)``.  Consequently each term is exactly zero at
+    ``SCHWEFEL_226_OPTIMUM_X`` even in a 10,000-dimensional instance.
+    """
+    x = np.asarray(x, dtype=float)
+    term = x * np.sin(np.sqrt(np.abs(x)))
+    return float(np.sum(_SCHWEFEL_226_OPTIMUM_TERM - term))
+
+
+def high_conditioned_ellipsoid(x: np.ndarray) -> float:
+    """Ellipsoid with a fixed ``10**6`` condition number, evaluated in O(d)."""
+    x = np.asarray(x, dtype=float)
+    if x.size == 0:
+        return 0.0
+    # For d=1 use the sole coefficient 1, preserving the stated condition
+    # number convention without a division by zero.
+    exponents = 6.0 * np.arange(x.size, dtype=float) / max(x.size - 1, 1)
+    return float(np.sum((10.0 ** exponents) * x**2))
+
+
 def dixon_price(x: np.ndarray) -> float:
     x = np.asarray(x, dtype=float)
     if x.size == 0:
@@ -251,6 +298,23 @@ def assign_config(name: str, dim: int) -> BenchmarkConfig:
         "ackley": ("Ackley", -32.768, 32.768, ackley, 0.0, np.zeros(dim)),
         "griewank": ("Griewank", -600.0, 600.0, griewank, 0.0, np.zeros(dim)),
         "rosenbrock": ("Rosenbrock", -5.0, 10.0, rosenbrock, 0.0, np.ones(dim)),
+        "levy": ("Levy", -10.0, 10.0, levy, 0.0, np.ones(dim)),
+        "schwefel": (
+            "Schwefel226", -500.0, 500.0, schwefel_226, 0.0,
+            np.full(dim, SCHWEFEL_226_OPTIMUM_X),
+        ),
+        "schwefel226": (
+            "Schwefel226", -500.0, 500.0, schwefel_226, 0.0,
+            np.full(dim, SCHWEFEL_226_OPTIMUM_X),
+        ),
+        "highconditionedellipsoid": (
+            "HighConditionedEllipsoid", -5.0, 5.0,
+            high_conditioned_ellipsoid, 0.0, np.zeros(dim),
+        ),
+        "ellipsoid": (
+            "HighConditionedEllipsoid", -5.0, 5.0,
+            high_conditioned_ellipsoid, 0.0, np.zeros(dim),
+        ),
         "dixonprice": ("DixonPrice", -10.0, 10.0, dixon_price, 0.0, None),
         "zakharov": ("Zakharov", -5.0, 10.0, zakharov, 0.0, np.zeros(dim)),
         "qing": ("Qing", -500.0, 500.0, qing, 0.0, None),

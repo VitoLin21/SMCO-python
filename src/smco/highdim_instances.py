@@ -29,7 +29,17 @@ from pathlib import Path
 import numpy as np
 
 from .paper_contract import canonical_json
-from .test_functions import ackley, griewank, rastrigin, rosenbrock, zakharov
+from .test_functions import (
+    ackley,
+    griewank,
+    high_conditioned_ellipsoid,
+    levy,
+    rastrigin,
+    rosenbrock,
+    SCHWEFEL_226_OPTIMUM_X,
+    schwefel_226,
+    zakharov,
+)
 
 # --- tunable constants (written into every artifact for reproducibility) ---
 FULL_ROTATION_DIM = 200
@@ -47,6 +57,13 @@ _BASE_REGISTRY: dict[str, tuple] = {
     "Griewank": (griewank, -600.0, 600.0, "zeros", 0.0),
     "Zakharov": (zakharov, -5.0, 10.0, "zeros", 0.0),
     "Rosenbrock": (rosenbrock, -5.0, 10.0, "ones", 0.0),
+    "Levy": (levy, -10.0, 10.0, "ones", 0.0),
+    "Schwefel226": (
+        schwefel_226, -500.0, 500.0, "schwefel", 0.0,
+    ),
+    "HighConditionedEllipsoid": (
+        high_conditioned_ellipsoid, -5.0, 5.0, "zeros", 0.0,
+    ),
 }
 
 
@@ -56,7 +73,13 @@ def known_functions() -> tuple[str, ...]:
 
 def base_optimum_x(name: str, dim: int) -> np.ndarray:
     kind = _BASE_REGISTRY[name][3]
-    return np.zeros(dim) if kind == "zeros" else np.ones(dim)
+    if kind == "zeros":
+        return np.zeros(dim)
+    if kind == "ones":
+        return np.ones(dim)
+    if kind == "schwefel":
+        return np.full(dim, SCHWEFEL_226_OPTIMUM_X)
+    raise ValueError(f"unknown base optimum kind: {kind!r}")
 
 
 def _base_raw(name: str):
@@ -178,7 +201,11 @@ class TransformSpec:
     def apply_inverse(self, z: np.ndarray) -> np.ndarray:
         z = np.asarray(z, dtype=float)
         r = self._rotate_inverse(z)
-        ri = r[np.argsort(self.permutation)]
+        # ``r == t[permutation]`` after undoing the rotation.  Scatter it
+        # back instead of computing ``argsort(permutation)`` for every
+        # objective call: this preserves the inverse exactly and is O(d).
+        ri = np.empty_like(r)
+        ri[self.permutation] = r
         return self._t_asym_inverse(ri)
 
     def sha256(self) -> str:

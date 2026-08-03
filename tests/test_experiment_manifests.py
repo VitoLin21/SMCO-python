@@ -15,6 +15,9 @@ from pathlib import Path
 import pytest
 
 from smco.experiment_manifests import (
+    E1_FUNCTIONS,
+    E3F_FUNCTIONS,
+    E7_FUNCTIONS,
     build_algorithm_config,
     build_manifest,
     build_task,
@@ -45,6 +48,14 @@ def _evo_config(**overrides):
     )
     base.update(overrides)
     return build_algorithm_config(**base)
+
+
+def test_prospective_function_registries_extend_without_mutating_frozen_e1():
+    assert E1_FUNCTIONS == ("Rastrigin", "Ackley", "Griewank", "Zakharov")
+    assert E3F_FUNCTIONS == (
+        "Rosenbrock", "Levy", "Schwefel226", "HighConditionedEllipsoid",
+    )
+    assert E7_FUNCTIONS == E1_FUNCTIONS + E3F_FUNCTIONS
 
 
 # ----------------------------- algorithm config -----------------------------
@@ -342,4 +353,3 @@ def test_expand_tasks_selects_start_points_hash_by_n_starts():
     by_n = {t["n_starts"]: t["start_points_hash"] for t in tasks}
     assert by_n[8] == "hash_n8"
     assert by_n[16] == "hash_n16"
-
