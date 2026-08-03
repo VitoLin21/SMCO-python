@@ -28,6 +28,7 @@ import numpy as np
 from .highdim_instances import HighDimInstance
 from .optimizer import smco, smco_br, smco_br_evo, smco_evo, smco_r, smco_r_evo, global_stage_iter_max
 from .paper_contract import NONE_TOKEN, parse_algorithm_id
+from .ultrahighdim_extension import WorkerProgressSink
 
 # Minimisation gap targets -> canonical CSV suffixes (paper_contract.RESULT_COLUMNS).
 _GAP_TARGETS: dict[str, float] = {"1e-1": 1e-1, "1e-2": 1e-2, "1e-3": 1e-3, "1e-5": 1e-5}
@@ -57,6 +58,7 @@ class _AnytimeObserver:
         self.fe = 0
         self.best_min = math.inf
         self.trace: list[tuple[int, float]] = []
+        self.progress_callback = None
 
     def __call__(self, x: np.ndarray) -> float:
         value = self.instance.objective(x)  # minimisation value
@@ -64,6 +66,8 @@ class _AnytimeObserver:
         if value < self.best_min:
             self.best_min = value
             self.trace.append((self.fe, self.best_min))
+        if self.progress_callback is not None:
+            self.progress_callback()
         return -value  # maximisation for SMCO
 
 
@@ -136,6 +140,24 @@ def run_task(
     observer = _AnytimeObserver(instance)
     starts = np.asarray(starts, dtype=float)
     initial_reference = float(np.median([instance.objective(s) for s in starts]))
+    progress_sink = WorkerProgressSink()
+
+    def publish_progress(*, force=False):
+        best = observer.best_min if observer.trace else initial_reference
+        span = initial_reference - known_optimum
+        target_hit = {
+            label: _first_fe_below_threshold(
+                observer.trace, known_optimum + target * span,
+            )
+            for label, target in _GAP_TARGETS.items()
+        }
+        progress_sink.emit(
+            fe_used=observer.fe, best_value=float(best),
+            normalized_gap=_gap(best, known_optimum, initial_reference),
+            target_hit_fe=target_hit, force=force,
+        )
+
+    observer.progress_callback = publish_progress
 
     # SMCO triggers evolution off iter_max (optimizer._evolution_boundaries).
     # Split the global FE budget across n_starts so every start advances before
@@ -180,6 +202,7 @@ def run_task(
     fe_used = observer.fe
     best_min = observer.best_min if observer.trace else initial_reference
     normalized_gap = _gap(best_min, known_optimum, initial_reference)
+    publish_progress(force=True)
 
     # Targets are RELATIVE to the normalized gap (contract 6 / plan 6.1):
     # target_hit when (best - f*) / (initial_reference - f*) <= target, i.e.

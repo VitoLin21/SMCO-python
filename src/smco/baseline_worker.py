@@ -40,6 +40,7 @@ from .evaluation import EvaluationBudgetExceeded
 from .highdim_instances import HighDimInstance
 from .paper_contract import NONE_TOKEN
 from .provenance import default_environment_hash, default_git_commit, default_machine_id
+from .ultrahighdim_extension import WorkerProgressSink
 
 _BASELINE_DISPATCH = {
     "DE": differential_evo,
@@ -64,6 +65,7 @@ class _MinObserver:
         self.best_min = math.inf
         self.trace: list[tuple[int, float]] = []
         self.counts_by_event: dict[str, int] = {}
+        self.progress_callback = None
 
     def __call__(self, x: np.ndarray) -> float:
         return self.evaluate(x, event="iterate")
@@ -79,6 +81,8 @@ class _MinObserver:
         if value < self.best_min:
             self.best_min = value
             self.trace.append((self.fe, self.best_min))
+        if self.progress_callback is not None:
+            self.progress_callback()
         return value
 
 
@@ -191,6 +195,24 @@ def run_baseline_task(
     failure_reason = NONE_TOKEN
     t0 = time.perf_counter()
     initial_values: list[float] = []
+    progress_sink = WorkerProgressSink()
+    initial_reference = known_optimum
+
+    def publish_progress(*, force=False):
+        best = observer.best_min if observer.trace else initial_reference
+        span = initial_reference - known_optimum
+        target_hit = {
+            label: _first_fe_below_threshold(
+                observer.trace, known_optimum + target * span,
+            )
+            for label, target in _GAP_TARGETS.items()
+        }
+        progress_sink.emit(
+            fe_used=observer.fe, best_value=float(best),
+            normalized_gap=_gap(best, known_optimum, initial_reference),
+            target_hit_fe=target_hit, force=force,
+        )
+
     try:
         # E7's stricter contract counts initial-reference evaluations as real
         # objective calls in the same FE pool. Preserve the already-frozen E3
@@ -202,6 +224,9 @@ def run_baseline_task(
             else:
                 value = instance.objective(start)
             initial_values.append(value)
+        initial_reference = float(np.median(initial_values))
+        observer.progress_callback = publish_progress
+        publish_progress(force=True)
 
         def bounded_objective(x):
             # Native box handling is frozen per adapter. Defensive clipping
@@ -247,6 +272,7 @@ def run_baseline_task(
         label: _first_fe_below_threshold(observer.trace, known_optimum + target * span)
         for label, target in _GAP_TARGETS.items()
     }
+    publish_progress(force=True)
 
     anytime = []
     for cp in checkpoints:
