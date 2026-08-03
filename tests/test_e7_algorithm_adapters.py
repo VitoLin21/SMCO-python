@@ -199,3 +199,17 @@ def test_r_package_version_mismatch_is_not_silently_accepted():
     assert result["status"] == "algorithm_failure"
     assert "version mismatch" in result["failure_reason"]
     assert result["fe_used"] == 0
+
+
+def test_r_contract_freezes_r_version_4_5_2():
+    """The E7 R adapter contract is frozen to R 4.5.2 to match the fleet,
+    which has converged on R 4.5.2 (focal math@ nodes and zftest GPU boxes).
+    Guard both the runtime version constant that preflight compares against
+    and the metadata rng string that ships verbatim into every outcome and
+    manifest task."""
+    from smco.e7_algorithm_adapters import _Rpy2Backend
+
+    assert _Rpy2Backend._R_VERSION == "4.5.2"
+    for algorithm_id in ("R-DEoptim", "STOGO"):
+        metadata = E7_ALGORITHM_METADATA[algorithm_id]
+        assert metadata["rng"].startswith("R 4.5.2 "), algorithm_id

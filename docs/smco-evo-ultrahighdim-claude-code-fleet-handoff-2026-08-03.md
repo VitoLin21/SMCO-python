@@ -67,6 +67,8 @@ Rscript -e 'cat(R.version$major,".",R.version$minor,"\n",sep=""); print(packageV
 
 当前代码冻结 SciPy `1.17.1`、R `4.3.2`、rpy2 `3.6.4`、DEoptim `2.2-8`、nloptr `2.2.1`，但权威 fleet 文档显示 9 台远端 R 节点已经统一为 R `4.5.2`；本机仍是 R 4.3.2 且缺 R 包/rpy2，253 尚未具备 R 环境。**推荐在生成 manifest 前把 E7 R adapter 合同统一改冻到 R 4.5.2**，补测试并形成新的 40-hex `FROZEN_SHA`，再给本机和 253 部署同版本。若坚持 4.3.2，则需在全部十一台节点部署隔离环境。两种方案只能选一种，不能在同一 manifest 下混跑。
 
+> **更新（code/environment gate 执行，2026-08-03）**：E7 R adapter 合同已统一改冻到 R `4.5.2`——`src/smco/e7_algorithm_adapters.py` 的 `_Rpy2Backend._R_VERSION`、`R-DEoptim`/`STOGO` 两条 `rng` metadata 与 ImportError 错误消息均已改为 `R 4.5.2`，并由 `tests/test_e7_algorithm_adapters.py::test_r_contract_freezes_r_version_4_5_2` 守护；同时保持 SciPy `1.17.1`、rpy2 `3.6.4`、DEoptim `2.2-8`、nloptr `2.2.1`，全量 pytest `635 passed`。本次 gate 提交的完整 HEAD SHA 即为正式 campaign 的 `FROZEN_SHA`。本机与 253 仍须在 preflight 阶段部署 R 4.5.2 + DEoptim + nloptr + rpy2 才能跑 R-DEoptim/STOGO；E3-F 的七个算法为纯 Python，不依赖 R。
+
 服务器文档所称“5 个 R 包”不包含 STOGO 所需的 `nloptr`；每节点还必须实测安装 `nloptr==2.2.1` 和 Python `rpy2==3.6.4`。任何一个 full-bundle 节点缺少 R/DEoptim/nloptr/rpy2 时不得领取正式 shard，也不得把 `unsupported_dependency` 当作算法性能结果。不得用同名 Python算法替代 R-DEoptim/STOGO。
 
 建议同时记录：CPU、物理核、内存、BLAS、`pip freeze`、`R sessionInfo()` 和环境 hash。正式进程设置单线程 BLAS：

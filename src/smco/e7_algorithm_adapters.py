@@ -53,7 +53,7 @@ E7_ALGORITHM_METADATA: dict[str, dict] = {
             "reltol": 1e-8,
         },
         "bounds_handling": "DEoptim native box constraints; observed callback clips defensively",
-        "rng": "R 4.3.2 Mersenne-Twister; set.seed(seed mod 2147483647)",
+        "rng": "R 4.5.2 Mersenne-Twister; set.seed(seed mod 2147483647)",
         "starts_semantics": "all frozen starts prefix initialpop; seeded uniform fill to NP",
         "fe_counting": "every objective callback, including initial population, uses the shared observer",
     },
@@ -67,7 +67,7 @@ E7_ALGORITHM_METADATA: dict[str, dict] = {
             "nl.info": False,
         },
         "bounds_handling": "nloptr::stogo native box constraints; observed callback clips defensively",
-        "rng": "R 4.3.2 Mersenne-Twister; set.seed(seed mod 2147483647)",
+        "rng": "R 4.5.2 Mersenne-Twister; set.seed(seed mod 2147483647)",
         "starts_semantics": "all frozen starts in stored order, sharing one FE budget",
         "fe_counting": "every objective callback, including package-internal search calls, uses the shared observer",
     },
@@ -176,7 +176,7 @@ def _preflight_python(algorithm_id: str, metadata: dict) -> None:
 class _Rpy2Backend:
     """Thin callback bridge to the frozen native R implementations."""
 
-    _R_VERSION = "4.3.2"
+    _R_VERSION = "4.5.2"
     _RPY2_VERSION = "3.6.4"
 
     def __init__(self) -> None:
@@ -187,7 +187,7 @@ class _Rpy2Backend:
             from rpy2.robjects.conversion import localconverter
         except (ImportError, OSError) as exc:
             raise UnsupportedAlgorithmError(
-                "R-DEoptim/STOGO require R 4.3.2 and rpy2==3.6.4; no Python "
+                "R-DEoptim/STOGO require R 4.5.2 and rpy2==3.6.4; no Python "
                 "optimizer substitution is permitted"
             ) from exc
         bridge_version = _installed_version("rpy2")
