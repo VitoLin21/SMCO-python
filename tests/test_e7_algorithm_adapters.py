@@ -271,3 +271,30 @@ def test_r_preflight_uses_packageversion_not_requirenamespace():
             algorithm_id="R-DEoptim",
             metadata={"package": "DEoptim", "package_version": "2.2-8"},
         )
+
+
+def test_r_backend_appends_user_library_to_libpaths(monkeypatch, tmp_path):
+    """Regression (2026-08-03 E7): rpy2's embedded R does not inherit
+    R_LIBS_USER from the dispatch environment, so packageVersion/require missed
+    DEoptim/nloptr installed in the fleet user library (~/Rlibs) and every
+    R-DEoptim/STOGO task became unsupported_dependency. _Rpy2Backend must append
+    R_LIBS_USER (and ~/Rlibs by default) to .libPaths when present."""
+    from smco.e7_algorithm_adapters import _Rpy2Backend
+
+    calls = []
+
+    class FakeRO:
+        def r(self, expr):
+            calls.append(expr)
+            if expr.strip() == ".libPaths()":
+                return ["/usr/lib/R/library"]
+            return []
+
+    backend = _Rpy2Backend.__new__(_Rpy2Backend)
+    backend.ro = FakeRO()
+    # R_LIBS_USER points at an existing dir -> must be appended.
+    monkeypatch.setenv("R_LIBS_USER", str(tmp_path))
+    backend._ensure_user_library()
+    appended = [c for c in calls if ".libPaths(c(" in c]
+    assert appended, calls
+    assert str(tmp_path) in appended[0]

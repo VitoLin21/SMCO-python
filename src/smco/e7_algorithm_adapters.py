@@ -17,6 +17,7 @@ from __future__ import annotations
 from copy import deepcopy
 from importlib import metadata as importlib_metadata
 from typing import Callable, Protocol
+import os
 
 import numpy as np
 
@@ -202,6 +203,32 @@ class _Rpy2Backend:
         self.conversion = conversion
         self.converter = default_converter + numpy2ri.converter
         self.localconverter = localconverter
+        self._ensure_user_library()
+
+    def _ensure_user_library(self) -> None:
+        """Append the fleet R user library to .libPaths.
+
+        rpy2 starts an embedded R that does NOT inherit R_LIBS_USER from the
+        dispatch environment, so packages installed in the fleet user library
+        (~/Rlibs, e.g. DEoptim/nloptr) were invisible to packageVersion and
+        every R-DEoptim/STOGO task became unsupported_dependency (2026-08-03).
+        Append R_LIBS_USER and ~/Rlibs to .libPaths when they exist.
+        """
+        candidates = []
+        env_libs = os.environ.get("R_LIBS_USER", "")
+        if env_libs:
+            candidates.extend(p for p in env_libs.split(os.pathsep) if p)
+        candidates.append(os.path.expanduser("~/Rlibs"))
+        existing = [str(p) for p in self.ro.r(".libPaths()")]
+        to_add = []
+        for candidate in candidates:
+            if (candidate and candidate not in to_add
+                    and candidate not in existing
+                    and os.path.isdir(candidate)):
+                to_add.append(candidate)
+        if to_add:
+            args = ", ".join(f'"{c}"' for c in to_add)
+            self.ro.r(f".libPaths(c({args}, .libPaths()))")
 
     def preflight(self, *, algorithm_id: str, metadata: dict) -> None:
         version = str(self.ro.r("paste(R.version$major, R.version$minor, sep='.')")[0])
