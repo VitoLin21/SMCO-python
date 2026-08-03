@@ -213,3 +213,13 @@ def test_r_contract_freezes_r_version_4_5_2():
     for algorithm_id in ("R-DEoptim", "STOGO"):
         metadata = E7_ALGORITHM_METADATA[algorithm_id]
         assert metadata["rng"].startswith("R 4.5.2 "), algorithm_id
+
+
+def test_python_contract_freezes_scipy_1_18_0():
+    """The L-BFGS scipy contract is frozen to 1.18.0 to match the fleet,
+    which has converged on scipy 1.18.0 (focal math@ + zftest GPU boxes).
+    E3-F's DE/SA/GenSA/SMCO also run through scipy, so a uniform scipy
+    version is required for cross-node numerical comparability."""
+    metadata = E7_ALGORITHM_METADATA["L-BFGS"]
+    assert metadata["package"] == "scipy"
+    assert metadata["package_version"] == "1.18.0"

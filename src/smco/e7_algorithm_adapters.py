@@ -74,7 +74,7 @@ E7_ALGORITHM_METADATA: dict[str, dict] = {
     "L-BFGS": {
         "language": "python",
         "package": "scipy",
-        "package_version": "1.17.1",
+        "package_version": "1.18.0",
         "hyperparameters": {
             "method": "L-BFGS-B",
             "jac": None,
