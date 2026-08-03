@@ -223,3 +223,51 @@ def test_python_contract_freezes_scipy_1_18_0():
     metadata = E7_ALGORITHM_METADATA["L-BFGS"]
     assert metadata["package"] == "scipy"
     assert metadata["package_version"] == "1.18.0"
+
+
+def test_r_preflight_uses_packageversion_not_requirenamespace():
+    """Regression (2026-08-03 E7): requireNamespace(pkg, quietly=TRUE) returns
+    an invisible logical, which rpy2 converts to None; indexing None[0] raised
+    TypeError and crashed every R-DEoptim/STOGO task in preflight (d=None,
+    fe=None, infra_failure). preflight must use packageVersion (a visible
+    StrVector) instead, and treat a missing package (packageVersion raises in
+    R) as an unsupported dependency rather than a crash."""
+    from smco.e7_algorithm_adapters import UnsupportedAlgorithmError, _Rpy2Backend
+
+    calls = []
+
+    class FakeRO:
+        def r(self, expr):
+            calls.append(expr)
+            if "R.version" in expr:
+                return ["4.5.2"]
+            if "packageVersion" in expr:
+                return ["2.2-8"]
+            return None  # requireNamespace(quietly=TRUE) -> invisible -> None
+
+    backend = _Rpy2Backend.__new__(_Rpy2Backend)  # bypass rpy2 import in __init__
+    backend.ro = FakeRO()
+    backend._R_VERSION = "4.5.2"
+
+    # Must NOT raise: the old code did `requireNamespace(...)[0]` on None.
+    backend.preflight(
+        algorithm_id="R-DEoptim",
+        metadata={"package": "DEoptim", "package_version": "2.2-8"},
+    )
+    # Must not call requireNamespace (the invisible-None path) at all.
+    assert not any("requireNamespace" in c for c in calls), calls
+
+    # Missing package (packageVersion raises in R) -> unsupported, not crash.
+    class MissingPkgRO(FakeRO):
+        def r(self, expr):
+            calls.append(expr)
+            if "packageVersion" in expr:
+                raise RuntimeError("there is no package called 'DEoptim'")
+            return super().r(expr)
+
+    backend.ro = MissingPkgRO()
+    with pytest.raises(UnsupportedAlgorithmError, match="not installed"):
+        backend.preflight(
+            algorithm_id="R-DEoptim",
+            metadata={"package": "DEoptim", "package_version": "2.2-8"},
+        )

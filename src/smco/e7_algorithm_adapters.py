@@ -210,16 +210,21 @@ class _Rpy2Backend:
                 f"{algorithm_id} requires R {self._R_VERSION}; installed={version}"
             )
         package = metadata["package"]
-        available = bool(self.ro.r(
-            f"requireNamespace({package!r}, quietly=TRUE)"
-        )[0])
-        if not available:
+        expected = metadata["package_version"]
+        # Do NOT use requireNamespace(pkg, quietly=TRUE): its invisible logical
+        # return becomes None in rpy2, and indexing None raised TypeError that
+        # crashed every R-DEoptim/STOGO task in preflight (2026-08-03 E7).
+        # packageVersion is a visible StrVector and raises in R when the package
+        # is missing, which we map to an unsupported dependency.
+        try:
+            installed = str(
+                self.ro.r(f"as.character(packageVersion({package!r}))")[0]
+            )
+        except Exception as exc:
             raise UnsupportedAlgorithmError(
                 f"{algorithm_id} requires R package {package}=="
-                f"{metadata['package_version']}; package is not installed"
-            )
-        installed = str(self.ro.r(f"as.character(packageVersion({package!r}))")[0])
-        expected = metadata["package_version"]
+                f"{expected}; package is not installed"
+            ) from exc
         if installed != expected:
             raise UnsupportedAlgorithmError(
                 f"{algorithm_id} requires R package {package}=={expected}; "
