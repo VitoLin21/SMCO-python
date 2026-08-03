@@ -112,6 +112,11 @@ def _hash_document(document: Mapping, hash_key: str) -> str:
     return _sha256_bytes(canonical_json(payload).encode("utf-8"))
 
 
+def _selection_payload_sha256(selection: Mapping) -> str:
+    """Bind the full selection document independently of its short stable ID."""
+    return _sha256_bytes(canonical_json(dict(selection)).encode("utf-8"))
+
+
 def _atomic_write_json(path, payload: Mapping) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -245,6 +250,7 @@ def _manifest_from_tasks(
         "campaign": campaign,
         "evidence_scope": "prospective_extension",
         "selection_hash": selection.get("selection_hash"),
+        "selection_payload_sha256": _selection_payload_sha256(selection),
         "winner_algorithm": E3F_ALGORITHMS[0],
         "matched_base_algorithm": E3F_ALGORITHMS[1],
         "deadline_hours": DEADLINE_HOURS,
@@ -287,6 +293,7 @@ def build_e3f_manifest(
         "campaign": "e3f", "component_role": "missing_function_extension",
         "evidence_scope": "prospective_extension",
         "selection_hash": selection.get("selection_hash"),
+        "selection_payload_sha256": _selection_payload_sha256(selection),
         "winner_algorithm": E3F_ALGORITHMS[0],
         "matched_base_algorithm": E3F_ALGORITHMS[1],
         "algorithms": list(E3F_ALGORITHMS),
@@ -340,6 +347,7 @@ def build_e7_manifest(
         "campaign": "e7", "component_role": "physically_new",
         "evidence_scope": "prospective_extension",
         "selection_hash": selection.get("selection_hash"),
+        "selection_payload_sha256": _selection_payload_sha256(selection),
         "winner_algorithm": E3F_ALGORITHMS[0],
         "matched_base_algorithm": E3F_ALGORITHMS[1],
         "algorithms": list(E7_ALGORITHMS),
@@ -425,8 +433,15 @@ def _validate_manifest(manifest: Mapping, campaign: str) -> list[str]:
     if manifest.get("wall_checkpoint_hours") != list(WALL_CHECKPOINT_HOURS):
         errors.append("wall checkpoint schedule must be exactly 1h/6h/24h/72h")
     selection_hash = manifest.get("selection_hash")
-    if not (isinstance(selection_hash, str) and len(selection_hash) == 64):
-        errors.append("manifest missing a 64-character frozen selection_hash")
+    if not (isinstance(selection_hash, str) and selection_hash):
+        errors.append("manifest missing a non-empty frozen selection_hash")
+    selection_payload_sha256 = manifest.get("selection_payload_sha256")
+    if not (
+        isinstance(selection_payload_sha256, str)
+        and len(selection_payload_sha256) == 64
+        and all(ch in "0123456789abcdef" for ch in selection_payload_sha256)
+    ):
+        errors.append("manifest missing a 64-hex selection_payload_sha256")
     tasks = list(manifest.get("tasks") or [])
     if manifest.get("n_tasks") != len(tasks):
         errors.append(f"n_tasks {manifest.get('n_tasks')} != physical task count {len(tasks)}")
@@ -560,6 +575,18 @@ def validate_shards(document: Mapping, manifest: Mapping) -> list[str]:
         errors.append("a run_id appears in more than one shard")
     if set(run_ids) != set(expected_ids) or len(run_ids) != len(expected_ids):
         errors.append("shard run_ids do not exactly cover the manifest")
+    manifest_tasks = {
+        task.get("run_id"): canonical_json(task) for task in manifest.get("tasks", [])
+    }
+    payload_mismatches = [
+        task.get("run_id") for task in tasks
+        if manifest_tasks.get(task.get("run_id")) != canonical_json(task)
+    ]
+    if payload_mismatches:
+        errors.append(
+            f"shard task payload differs from frozen manifest for "
+            f"{len(payload_mismatches)} run_id(s)"
+        )
     owners: dict[tuple, set[str]] = {}
     for shard in document.get("shards", []):
         for task in shard.get("tasks", []):
@@ -886,6 +913,12 @@ def supervise_command(
         environment_hash=environment_hash,
     )
     attempt_id = started["attempt_id"]
+    attempts = ledger.attempts()
+    first_started_unix_sec = float(attempts[0]["started_unix_sec"])
+    # The 72h operational clock belongs to the logical run_id, not to an
+    # individual infrastructure attempt.  Retries therefore cannot obtain a
+    # fresh deadline window.
+    elapsed_before_attempt = max(0.0, time.time() - first_started_unix_sec)
     attempt_dir = run_dir / "attempts" / attempt_id
     attempt_dir.mkdir(parents=True, exist_ok=True)
     progress_path = attempt_dir / "worker_progress.json"
@@ -905,29 +938,30 @@ def supervise_command(
     if extra_env:
         env.update({str(key): str(value) for key, value in extra_env.items()})
     t0 = time.monotonic()
-    process = subprocess.Popen(
-        list(command), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
-    )
-    while process.poll() is None:
-        elapsed = time.monotonic() - t0
-        progress = _read_json_if_valid(progress_path) or {}
-        reporter.record(
-            fe_used=progress.get("fe_used"), best_value=progress.get("best_value"),
-            normalized_gap=progress.get("normalized_gap"),
-            target_hit_fe=progress.get("target_hit_fe") or {},
-            process_resources=_process_resources(process.pid), elapsed_sec=elapsed,
-            progress_updated_unix_sec=(
-                progress_path.stat().st_mtime if progress_path.exists() else None
-            ),
+    stdout_path = attempt_dir / "stdout.log"
+    stderr_path = attempt_dir / "stderr.log"
+    with open(stdout_path, "w") as stdout_handle, open(stderr_path, "w") as stderr_handle:
+        process = subprocess.Popen(
+            list(command), stdin=subprocess.DEVNULL, stdout=stdout_handle,
+            stderr=stderr_handle, text=True, env=env,
         )
-        try:
-            process.wait(timeout=max(0.001, float(poll_interval_sec)))
-        except subprocess.TimeoutExpired:
-            pass
-    stdout, stderr = process.communicate()
-    elapsed = time.monotonic() - t0
-    (attempt_dir / "stdout.log").write_text(stdout or "")
-    (attempt_dir / "stderr.log").write_text(stderr or "")
+        while process.poll() is None:
+            elapsed = elapsed_before_attempt + (time.monotonic() - t0)
+            progress = _read_json_if_valid(progress_path) or {}
+            reporter.record(
+                fe_used=progress.get("fe_used"), best_value=progress.get("best_value"),
+                normalized_gap=progress.get("normalized_gap"),
+                target_hit_fe=progress.get("target_hit_fe") or {},
+                process_resources=_process_resources(process.pid), elapsed_sec=elapsed,
+                progress_updated_unix_sec=(
+                    progress_path.stat().st_mtime if progress_path.exists() else None
+                ),
+            )
+            try:
+                process.wait(timeout=max(0.001, float(poll_interval_sec)))
+            except subprocess.TimeoutExpired:
+                pass
+    elapsed = elapsed_before_attempt + (time.monotonic() - t0)
     outcome = _read_json_if_valid(result_path)
     if outcome is None:
         outcome = {
@@ -943,9 +977,12 @@ def supervise_command(
             "best_value": None, "normalized_gap": None, "target_hit_fe": {},
             "failure_reason": "worker result run_id mismatch",
         }
-    outcome.setdefault("machine_id", machine_id or socket.gethostname())
-    outcome.setdefault("git_commit", git_commit)
-    outcome.setdefault("environment_hash", environment_hash)
+    # Dispatcher metadata is authoritative.  In particular, workers on an
+    # rsync'd fleet checkout may emit an empty git_commit; never preserve that
+    # empty value over the frozen coordinator provenance.
+    outcome["machine_id"] = machine_id or socket.gethostname()
+    outcome["git_commit"] = git_commit
+    outcome["environment_hash"] = environment_hash
     final = reporter.finalize(outcome, elapsed_sec=elapsed)
     evidence_hashes = {}
     for relative in (
@@ -1546,6 +1583,123 @@ def _filtered_rows(rows: Iterable[Mapping], filters: Mapping | None) -> list[dic
     return result
 
 
+def _instance_provenance_errors(rows: Sequence[Mapping]) -> list[str]:
+    """Require every algorithm in a logical problem cell to share artifacts."""
+    grouped: dict[tuple, dict[str, set[str]]] = {}
+    for row in rows:
+        key = (row.get("function"), int(row.get("dimension")), int(row.get("instance")))
+        values = grouped.setdefault(
+            key, {"instance_hash": set(), "start_points_hash": set()},
+        )
+        for field in values:
+            value = str(row.get(field) or "")
+            values[field].add(value)
+    errors = []
+    for key, values in grouped.items():
+        if any("" in hashes or len(hashes) != 1 for hashes in values.values()):
+            errors.append(
+                f"instance/start provenance mismatch for {key}: "
+                f"instance_hashes={sorted(values['instance_hash'])}, "
+                f"start_points_hashes={sorted(values['start_points_hash'])}"
+            )
+    return errors
+
+
+def _frozen_source_document_errors(value: Mapping) -> list[str]:
+    """Validate old and extension source documents with their native hashes."""
+    if value.get("frozen") is not True:
+        return ["source document is not frozen"]
+    if value.get("composite_type") == "comparative_composite":
+        # The legacy E3 composite predates this module and intentionally uses
+        # confirmatory.com's historical JSON hash serialization.
+        from .confirmatory import validate_composite
+
+        return validate_composite(value)
+    errors = []
+    if "index_sha256" in value and value.get("index_sha256") != _hash_document(
+        value, "index_sha256"
+    ):
+        errors.append("source index self-hash mismatch")
+    if "composite_sha256" in value and value.get("composite_sha256") != _hash_document(
+        value, "composite_sha256"
+    ):
+        errors.append("source composite self-hash mismatch")
+    return errors
+
+
+def _result_source_errors(source: Mapping, rows: Sequence[Mapping]) -> list[str]:
+    """Validate a new physical result source against its manifest and audit."""
+    role = source.get("role")
+    if role not in {"e3f", "physically_new"}:
+        return []
+    errors: list[str] = []
+    manifest_path = Path(source.get("manifest_path") or "")
+    audit_path = Path(source.get("audit_path") or "")
+    manifest = _read_json_if_valid(manifest_path)
+    audit = _read_json_if_valid(audit_path)
+    if manifest is None:
+        return [f"{role} source manifest missing/invalid: {manifest_path}"]
+    campaign = "e3f" if role == "e3f" else "e7"
+    errors.extend(
+        f"{role} manifest: {error}" for error in (
+            validate_e3f_manifest(manifest) if campaign == "e3f"
+            else validate_e7_manifest(manifest)
+        )
+    )
+    if audit is None:
+        errors.append(f"{role} source audit missing/invalid: {audit_path}")
+    else:
+        if audit.get("passed") is not True:
+            errors.append(f"{role} source audit is not passed")
+        if audit.get("manifest_sha256") != manifest.get("manifest_sha256"):
+            errors.append(f"{role} source audit is not bound to manifest")
+        if audit.get("n_rows") != len(rows):
+            errors.append(f"{role} source audit row count mismatch")
+        checks = audit.get("checks") or []
+        if len(checks) != 12 or not all(check.get("passed") for check in checks):
+            errors.append(f"{role} source audit lacks 12 passed main checks")
+        deadline_checks = audit.get("deadline_checks") or []
+        if not deadline_checks or not all(check.get("passed") for check in deadline_checks):
+            errors.append(f"{role} source audit deadline checks not passed")
+    task_by_id = {task.get("run_id"): task for task in manifest.get("tasks") or []}
+    row_ids = [row.get("run_id") for row in rows]
+    if len(row_ids) != len(set(row_ids)) or set(row_ids) != set(task_by_id):
+        errors.append(f"{role} CSV run_ids do not exactly cover its manifest")
+    for row in rows:
+        run_id = row.get("run_id")
+        task = task_by_id.get(run_id)
+        if task is None:
+            continue
+        for field in (
+            "function", "dimension", "instance", "configuration_hash",
+            "instance_hash", "start_points_hash", "fe_budget",
+        ):
+            if str(row.get(field)) != str(task.get(field)):
+                errors.append(f"{role} {run_id}: {field} differs from manifest")
+        if row.get("algorithm_id") != (task.get("algorithm_id") or task.get("algorithm")):
+            errors.append(f"{role} {run_id}: algorithm differs from manifest")
+        status = row.get("status")
+        if status not in TERMINAL_STATUSES:
+            errors.append(f"{role} {run_id}: invalid status {status!r}")
+        try:
+            fe_used = int(row.get("fe_used"))
+            if fe_used < 0 or fe_used > int(task.get("fe_budget")):
+                raise ValueError
+        except (TypeError, ValueError):
+            errors.append(f"{role} {run_id}: invalid FE usage")
+        if status == "success":
+            try:
+                values = (
+                    float(row.get("best_value")), float(row.get("known_optimum")),
+                    float(row.get("normalized_gap")),
+                )
+                if not all(math.isfinite(value) for value in values):
+                    raise ValueError
+            except (TypeError, ValueError):
+                errors.append(f"{role} {run_id}: invalid successful numeric result")
+    return errors
+
+
 def build_extension_composite(
     campaign: str, *, sources: Sequence[Mapping], selection_hash: str,
     source_documents: Sequence[str | Path] = (), output_csv=None,
@@ -1580,6 +1734,20 @@ def build_extension_composite(
                 canonical_json(sorted(run_ids)).encode("utf-8")
             ),
         }
+        if source.get("role") in {"e3f", "physically_new"}:
+            record.update({
+                "manifest_path": str(source.get("manifest_path") or ""),
+                "manifest_sha256": file_sha256(source["manifest_path"])
+                if source.get("manifest_path") and Path(source["manifest_path"]).is_file()
+                else None,
+                "audit_path": str(source.get("audit_path") or ""),
+                "audit_sha256": file_sha256(source["audit_path"])
+                if source.get("audit_path") and Path(source["audit_path"]).is_file()
+                else None,
+            })
+            source_errors = _result_source_errors(record, rows)
+            if source_errors:
+                raise ValueError("; ".join(source_errors[:10]))
         records.append(record)
         combined.extend(rows)
     cells = [_row_cell(row) for row in combined]
@@ -1591,20 +1759,18 @@ def build_extension_composite(
         )
     if len(run_ids) != len(set(run_ids)):
         raise ValueError("logical composite has cross-source run_id overlap")
+    provenance_errors = _instance_provenance_errors(combined)
+    if provenance_errors:
+        raise ValueError("; ".join(provenance_errors[:5]))
     document_records = []
     for path_value in source_documents:
         path = Path(path_value)
         value = _read_json_if_valid(path)
-        if value is None or value.get("frozen") is not True:
+        if value is None:
             raise ValueError(f"source document is not frozen valid JSON: {path}")
-        if "index_sha256" in value and value.get("index_sha256") != _hash_document(
-            value, "index_sha256"
-        ):
-            raise ValueError(f"source index self-hash mismatch: {path}")
-        if "composite_sha256" in value and value.get("composite_sha256") != _hash_document(
-            value, "composite_sha256"
-        ):
-            raise ValueError(f"source composite self-hash mismatch: {path}")
+        document_errors = _frozen_source_document_errors(value)
+        if document_errors:
+            raise ValueError(f"invalid source document {path}: " + "; ".join(document_errors))
         document_records.append({"path": str(path), "sha256": file_sha256(path)})
     composite = {
         "schema_version": "1", "composite_type": "extension_logical_composite",
@@ -1656,6 +1822,18 @@ def validate_extension_composite(composite: Mapping) -> list[str]:
             errors.append(f"source run_id set mismatch: {source.get('role')}")
         if len(ids) != len(set(ids)):
             errors.append(f"source duplicate run_id: {source.get('role')}")
+        if source.get("role") in {"e3f", "physically_new"}:
+            manifest_path = Path(source.get("manifest_path") or "")
+            audit_path = Path(source.get("audit_path") or "")
+            if not manifest_path.is_file() or (
+                file_sha256(manifest_path) != source.get("manifest_sha256")
+            ):
+                errors.append(f"source manifest hash mismatch: {source.get('role')}")
+            if not audit_path.is_file() or file_sha256(audit_path) != source.get(
+                "audit_sha256"
+            ):
+                errors.append(f"source audit hash mismatch: {source.get('role')}")
+            errors.extend(_result_source_errors(source, rows))
         combined.extend(rows)
     for record in composite.get("source_documents") or []:
         path = Path(record.get("path") or "")
@@ -1665,16 +1843,10 @@ def validate_extension_composite(composite: Mapping) -> list[str]:
             errors.append(f"source document hash mismatch: {path}")
         else:
             value = _read_json_if_valid(path) or {}
-            if value.get("frozen") is not True:
-                errors.append(f"source document is not frozen: {path}")
-            if "index_sha256" in value and value.get("index_sha256") != _hash_document(
-                value, "index_sha256"
-            ):
-                errors.append(f"source index self-hash mismatch: {path}")
-            if "composite_sha256" in value and value.get("composite_sha256") != _hash_document(
-                value, "composite_sha256"
-            ):
-                errors.append(f"source composite self-hash mismatch: {path}")
+            errors.extend(
+                f"source document {path}: {error}"
+                for error in _frozen_source_document_errors(value)
+            )
     if not composite.get("source_documents"):
         errors.append("composite has no upstream frozen source document")
     expected = expected_logical_grid("e3_combined" if campaign == "e3f" else "e7")
@@ -1687,6 +1859,7 @@ def validate_extension_composite(composite: Mapping) -> list[str]:
         )
     if len(ids) != len(set(ids)):
         errors.append("cross-source run_id overlap")
+    errors.extend(_instance_provenance_errors(combined))
     if composite.get("total_rows") != len(expected):
         errors.append(f"total_rows {composite.get('total_rows')} != {len(expected)}")
     if composite.get("run_id_set_sha256") != _sha256_bytes(
@@ -1869,6 +2042,19 @@ def validate_extension_index(index: Mapping, *, root=".") -> list[str]:
                     f"logical composite: {error}"
                     for error in validate_extension_composite(value)
                 )
+                if value.get("campaign") != campaign:
+                    errors.append("logical composite campaign does not match index")
+                expected_rows = 840 if campaign == "e3f" else 2016
+                if value.get("total_rows") != expected_rows:
+                    errors.append(
+                        f"logical composite rows {value.get('total_rows')} != {expected_rows}"
+                    )
+                if composite.get("expected_rows") != expected_rows:
+                    errors.append("index composite expected_rows contract mismatch")
+                if manifest is not None and value.get("selection_hash") != manifest.get(
+                    "selection_hash"
+                ):
+                    errors.append("logical composite selection_hash does not match manifest")
     return errors
 
 

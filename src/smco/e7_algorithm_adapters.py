@@ -43,10 +43,10 @@ E7_ALGORITHM_METADATA: dict[str, dict] = {
         "package_version": "2.2-8",
         "hyperparameters": {
             "strategy": 2,
-            "NP": "max(50, 10*d, n_starts)",
+            "NP": "max(n_starts, min(512, max(50, 10*d)))",
             "F": 0.8,
             "CR": 0.5,
-            "itermax": "fe_budget",
+            "itermax": "max(1, floor(remaining_fe_budget/NP))",
             "trace": False,
             "storepopfrom": "itermax+1",
             "steptol": 50,
@@ -63,7 +63,7 @@ E7_ALGORITHM_METADATA: dict[str, dict] = {
         "package_version": "2.2.1",
         "hyperparameters": {
             "method": "stogo",
-            "maxeval": "remaining_fe_budget_per_start",
+            "maxeval": "balanced_split_of_remaining_fe_budget_across_starts",
             "nl.info": False,
         },
         "bounds_handling": "nloptr::stogo native box constraints; observed callback clips defensively",
@@ -260,7 +260,7 @@ class _Rpy2Backend:
                 function(fn, lower, upper, starts, seed, itermax) {
                   set.seed(seed)
                   d <- length(lower)
-                  np <- max(50L, 10L * d, nrow(starts))
+                  np <- max(nrow(starts), min(512L, max(50L, 10L * d)))
                   n_extra <- np - nrow(starts)
                   if (n_extra > 0L) {
                     u <- matrix(runif(n_extra * d), nrow=n_extra, ncol=d)
@@ -268,10 +268,11 @@ class _Rpy2Backend:
                     fill <- sweep(fill, 2L, lower, `+`)
                     initialpop <- rbind(starts, fill)
                   } else initialpop <- starts
+                  n_generations <- max(1L, as.integer(floor(itermax / np)))
                   ctrl <- DEoptim::DEoptim.control(
                     strategy=2L, NP=np, F=0.8, CR=0.5,
-                    itermax=itermax, trace=FALSE, initialpop=initialpop,
-                    storepopfrom=itermax + 1L, steptol=50L, reltol=1e-8)
+                    itermax=n_generations, trace=FALSE, initialpop=initialpop,
+                    storepopfrom=n_generations + 1L, steptol=50L, reltol=1e-8)
                   invisible(DEoptim::DEoptim(fn=fn, lower=lower, upper=upper,
                                              control=ctrl))
                 }
@@ -285,10 +286,15 @@ class _Rpy2Backend:
                 """
                 function(fn, lower, upper, starts, seed, maxeval) {
                   set.seed(seed)
+                  n_starts <- nrow(starts)
+                  base_budget <- as.integer(maxeval %/% n_starts)
+                  extra <- as.integer(maxeval %% n_starts)
                   for (i in seq_len(nrow(starts))) {
+                    start_budget <- base_budget + ifelse(i <= extra, 1L, 0L)
+                    if (start_budget <= 0L) next
                     invisible(nloptr::stogo(
                       x0=starts[i,], fn=fn, lower=lower, upper=upper,
-                      maxeval=maxeval, nl.info=FALSE))
+                      maxeval=start_budget, nl.info=FALSE))
                   }
                 }
                 """

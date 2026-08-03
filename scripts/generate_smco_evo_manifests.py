@@ -242,7 +242,7 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--suite-stage",
         default="development",
-        choices=["development", "confirmatory"],
+        choices=["development", "confirmatory", "extension_confirmatory"],
         help="Instance-id / seed namespace (dev vs confirmatory must not overlap).",
     )
     parser.add_argument(

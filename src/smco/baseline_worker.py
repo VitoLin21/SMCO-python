@@ -187,6 +187,11 @@ def run_baseline_task(
         )
     if int(fe_budget) <= 0:
         raise ValueError("fe_budget must be positive")
+    if int(fe_budget) < int(starts.shape[0]):
+        raise ValueError(
+            "E7 FE budget must be at least n_starts because every frozen "
+            "start is charged as an initialization evaluation"
+        )
     if np.any(starts < instance.bounds_lower) or np.any(starts > instance.bounds_upper):
         raise ValueError("all frozen starts must lie inside the instance bounds")
     known_optimum = float(instance.known_optimum_value)
@@ -238,16 +243,21 @@ def run_baseline_task(
             )
             return observer.evaluate(point, event="iterate")
 
-        algorithm(
-            bounded_objective,
-            instance.bounds_lower,
-            instance.bounds_upper,
-            start_points=starts,
-            maximize=False,
-            max_iter=(int(fe_budget) if algorithm_name in ("R-DEoptim", "STOGO") else
-                      max(int(fe_budget), 1000)),
-            seed=int(seed),
-        )
+        remaining_fe_budget = int(fe_budget) - observer.fe
+        if remaining_fe_budget > 0:
+            algorithm(
+                bounded_objective,
+                instance.bounds_lower,
+                instance.bounds_upper,
+                start_points=starts,
+                maximize=False,
+                max_iter=(
+                    remaining_fe_budget
+                    if algorithm_name in ("R-DEoptim", "STOGO")
+                    else max(remaining_fe_budget, 1000)
+                ),
+                seed=int(seed),
+            )
     except EvaluationBudgetExceeded:
         pass  # expected hard stop at the FE budget
     except Exception as exc:  # noqa: BLE001 - report, don't crash

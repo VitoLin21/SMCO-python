@@ -32,7 +32,7 @@ class _RStub:
 
     def run(self, *, algorithm_id, objective, bounds_lower, bounds_upper,
             start_points, seed, max_iter, metadata):
-        self.calls.append((algorithm_id, seed, metadata))
+        self.calls.append((algorithm_id, seed, metadata, max_iter))
         # Simulate native package callbacks, including a repeated objective
         # call. Every callback must pass through the Python FE observer.
         objective(start_points[0])
@@ -118,6 +118,33 @@ def test_r_adapters_use_distinct_ids_and_controllable_stub(algorithm_id):
     assert result["fe_used"] == 5
     assert stub.calls[0][0] == algorithm_id
     assert result["algorithm_metadata"]["language"] == "r"
+    # Initial-reference evaluations are charged first; the native adapter gets
+    # only the still-available FE budget.
+    assert stub.calls[0][3] == 8
+
+
+def test_e7_rejects_budget_smaller_than_frozen_start_set():
+    instance = generate_instance("Ackley", 3, 0, seed=3)
+    starts = _starts(instance, n_starts=3)
+    with pytest.raises(ValueError, match="at least n_starts"):
+        run_baseline_task(
+            "SPSA", instance, starts, fe_budget=2, seed=13,
+            checkpoints=(2,),
+        )
+
+
+def test_r_deoptim_population_is_capped_for_ultrahigh_dimensions():
+    metadata = E7_ALGORITHM_METADATA["R-DEoptim"]
+    assert metadata["hyperparameters"]["NP"] == (
+        "max(n_starts, min(512, max(50, 10*d)))"
+    )
+
+
+def test_stogo_metadata_freezes_balanced_total_budget_split():
+    metadata = E7_ALGORITHM_METADATA["STOGO"]
+    assert metadata["hyperparameters"]["maxeval"] == (
+        "balanced_split_of_remaining_fe_budget_across_starts"
+    )
 
 
 @pytest.mark.parametrize("algorithm_id", ["R-DEoptim", "STOGO"])

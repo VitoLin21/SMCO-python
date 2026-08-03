@@ -193,6 +193,19 @@ def test_new_functions_replay_hash_and_transformed_optimum(function_name):
     assert a.objective(a.known_optimum_x) == 0.0
 
 
+def test_schwefel_domain_extension_prevents_false_below_optimum_value():
+    inst = generate_instance(
+        "Schwefel226", dimension=200, instance_id=0,
+        stage="extension_confirmatory",
+    )
+    z = np.zeros(inst.dimension)
+    z[0] = 717.0659474261937 - 420.9687462275036
+    x = inst.known_optimum_x + inst.transform_spec.apply_forward(z)
+    assert np.all(x >= inst.bounds_lower)
+    assert np.all(x <= inst.bounds_upper)
+    assert inst.objective(x) >= inst.known_optimum_value
+
+
 def test_block_size_is_part_of_the_replay_hash():
     a = generate_instance("Levy", dimension=240, instance_id=2, seed=4, block_size=40)
     b = generate_instance("Levy", dimension=240, instance_id=2, seed=4, block_size=60)

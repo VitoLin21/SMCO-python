@@ -58,6 +58,9 @@ def _eval_in_r(artifact_dir, function_name, dim, asym, scale, opt_value, points)
         ("Griewank", 12),
         ("Zakharov", 240),  # block rotation (d > FULL_ROTATION_DIM)
         ("Rosenbrock", 4),  # non-zero base optimum (ones)
+        ("Levy", 8),
+        ("Schwefel226", 8),
+        ("HighConditionedEllipsoid", 12),
     ],
 )
 def test_r_objective_matches_python(tmp_path, function_name, dim):

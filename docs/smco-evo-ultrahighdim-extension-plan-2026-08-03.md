@@ -64,6 +64,12 @@ Michalewicz 不进入主集合，因为高维全局最优值没有可审计的�
 
 每个新增算法必须冻结 package/version、语言、默认参数的任何覆盖、边界处理、随机数生成、starts 语义和 FE 计数方法。内部一次 gradient/Jacobian 调用产生的所有 objective evaluations 都必须计入 FE。
 
+为保证 `d=10000` 可实际运行，`R-DEoptim` 的种群冻结为
+`max(n_starts,min(512,max(50,10*d)))`。这是一项预注册的内存上限：未截断的
+`10*d=100000` 种群仅三份 Python/R 中间矩阵就超过 22 GiB。`itermax` 按剩余
+FE/NP 换算。STOGO 把扣除 starts 初始化后的剩余 FE 在 frozen starts 间平衡
+分摊，不允许第一个 start 独占全局预算。两项调整均在 outcome metadata 中逐行记录。
+
 GD、ADAM 和 BOBYQA 不进入 E7 主矩阵：前两者与 SignGD/SPSA 信息重复，BOBYQA 在 10000 维的内存和模型规模不可接受。可在补充材料说明其未纳入理由，不得把未运行描述成失败。
 
 ## 4. E3-F：缺失函数补充
@@ -90,6 +96,11 @@ GD、ADAM 和 BOBYQA 不进入 E7 主矩阵：前两者与 SignGD/SPSA 信息重
 ```
 
 E3-F 使用单独 frozen component manifest。联合分析通过 composite manifest 引用原 E3 与 E3-F，不改原 E3 的 run_id、stage、manifest 或 canonical index。
+
+Schwefel 使用标准 `[-500,500]^d` 盒内不变、盒外二次延拓的 2.26 版本。原因是
+旋转/平移后的外层可行点可能映射到标准盒外，而未延拓的 Schwefel 在盒外可低于
+文献中的零最优值。延拓只作用于基础坐标越界部分，并保证全空间已知最优值仍为
+`0 @ 420.968746...`；Python/R 必须逐点一致。
 
 ## 5. E7：超高维实验
 
@@ -121,6 +132,11 @@ E7 physically new:                               1736 runs
 ```
 
 因此 E7 实际新跑 **1736 runs**，与早期“约 1776 runs”的估计接近；E7 最终分析表为 2016 rows。禁止为了凑整数重复运行已有的 280 条结果。
+
+这里的“复用”要求逐 cell 复用完全相同的 `instance_hash` 和
+`start_points_hash`：原四函数的 d=1000 新算法必须引用旧 E3 confirmatory
+instances，新增四函数必须引用 E3-F instances。不得为五个新增算法另生成一套
+d=1000 transform/starts 后仅按 function/dimension/instance 编号拼表。
 
 两个 campaign 合计新执行：
 
@@ -235,6 +251,8 @@ problem bundle = function x dimension x instance
 - 每个 FE/wall checkpoint 原子写 sidecar；
 - coordinator 每小时汇总 planned/running/completed/deadline-exceeded/failed；
 - 超过 72h 后继续运行并标红，不自动 kill；
+- 72h 时钟属于 logical run_id；基础设施重试累计先前 attempt 与重试间的经过时间，
+  不因新 attempt 重新获得 72 小时窗口；
 - 节点维护或重启前保存 checkpoint；不支持算法内部恢复时，以新 attempt 从相同 seed 重跑并保留旧 attempt；
 - 禁止删除慢任务、失败任务或只合并完成较快的算法。
 

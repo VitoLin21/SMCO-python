@@ -16,7 +16,11 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from smco.provenance import default_environment_hash, default_git_commit
+from smco.provenance import (
+    default_environment_hash,
+    default_git_commit,
+    require_confirmatory_provenance,
+)
 from smco.ultrahighdim_extension import (
     E3F_FUNCTIONS,
     E7_FUNCTIONS,
@@ -83,10 +87,15 @@ def _selected_tasks(manifest, shard_path=None, shard_id=None):
     return list(shard["tasks"])
 
 
-def _worker_command(task_path: Path, instance_root: str) -> list[str]:
+def _worker_command(
+    task_path: Path, instance_root: str, *, machine_id: str,
+    git_commit: str, environment_hash: str,
+) -> list[str]:
     return [
         sys.executable, str(_THIS_SCRIPT), "worker",
         "--task", str(task_path), "--instance-root", str(instance_root),
+        "--machine-id", machine_id, "--git-commit", git_commit,
+        "--environment-hash", environment_hash,
     ]
 
 
@@ -97,7 +106,10 @@ def _dispatch_task(task, *, instance_root, evidence_root, machine_id,
     task_path = cache / f"{task['run_id']}.task.json"
     task_path.write_text(json.dumps(task, indent=2, sort_keys=True))
     return supervise_command(
-        _worker_command(task_path, instance_root), run_id=task["run_id"],
+        _worker_command(
+            task_path, instance_root, machine_id=machine_id,
+            git_commit=git_commit, environment_hash=environment_hash,
+        ), run_id=task["run_id"],
         evidence_root=evidence_root, machine_id=machine_id,
         git_commit=git_commit, environment_hash=environment_hash,
     )
@@ -185,8 +197,12 @@ def main(argv=None) -> int:
     composite_parser.add_argument("--selection-hash", required=True)
     composite_parser.add_argument("--original-e3-valid", default=None)
     composite_parser.add_argument("--e3f-valid", default=None)
+    composite_parser.add_argument("--e3f-manifest", default=None)
+    composite_parser.add_argument("--e3f-audit", default=None)
     composite_parser.add_argument("--e3-combined-valid", default=None)
     composite_parser.add_argument("--e7-new-valid", default=None)
+    composite_parser.add_argument("--e7-manifest", default=None)
+    composite_parser.add_argument("--e7-audit", default=None)
     composite_parser.add_argument("--source-document", action="append", default=[])
     composite_parser.add_argument("--materialized-out", required=True)
     composite_parser.add_argument("--out", required=True)
@@ -265,6 +281,7 @@ def main(argv=None) -> int:
             "git_commit": args.git_commit or default_git_commit(),
             "environment_hash": args.environment_hash or default_environment_hash(),
         }
+        require_confirmatory_provenance(**metadata)
         outcomes = []
         with ThreadPoolExecutor(max_workers=max(1, args.workers)) as executor:
             futures = {
@@ -339,19 +356,29 @@ def main(argv=None) -> int:
                     "--e3-combined-valid is not the materialized CSV bound by E3-F composite"
                 )
         if args.campaign == "e3f":
-            if not args.original_e3_valid or not args.e3f_valid:
-                parser.error("e3f composite requires --original-e3-valid and --e3f-valid")
+            if not all((args.original_e3_valid, args.e3f_valid,
+                        args.e3f_manifest, args.e3f_audit)):
+                parser.error(
+                    "e3f composite requires --original-e3-valid, --e3f-valid, "
+                    "--e3f-manifest and --e3f-audit"
+                )
             sources = [
                 {"role": "original_e3", "valid_runs_path": args.original_e3_valid},
-                {"role": "e3f", "valid_runs_path": args.e3f_valid},
+                {"role": "e3f", "valid_runs_path": args.e3f_valid,
+                 "manifest_path": args.e3f_manifest, "audit_path": args.e3f_audit},
             ]
         else:
-            if not args.e3_combined_valid or not args.e7_new_valid:
-                parser.error("e7 composite requires --e3-combined-valid and --e7-new-valid")
+            if not all((args.e3_combined_valid, args.e7_new_valid,
+                        args.e7_manifest, args.e7_audit)):
+                parser.error(
+                    "e7 composite requires --e3-combined-valid, --e7-new-valid, "
+                    "--e7-manifest and --e7-audit"
+                )
             sources = [
                 {"role": "reused_d1000", "valid_runs_path": args.e3_combined_valid,
                  "filter": {"dimension": 1000}},
-                {"role": "physically_new", "valid_runs_path": args.e7_new_valid},
+                {"role": "physically_new", "valid_runs_path": args.e7_new_valid,
+                 "manifest_path": args.e7_manifest, "audit_path": args.e7_audit},
             ]
         composite = build_extension_composite(
             args.campaign, sources=sources, selection_hash=args.selection_hash,

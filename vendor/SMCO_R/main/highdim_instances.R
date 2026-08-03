@@ -32,6 +32,28 @@ base_objective <- list(
   rosenbrock = function(x) {
     n <- length(x)
     sum(100 * (x[2:n] - x[1:(n - 1)]^2)^2 + (1 - x[1:(n - 1)])^2)
+  },
+  levy = function(x) {
+    w <- 1 + (x - 1) / 4
+    first <- sin(pi * (w[1] - 1))^2
+    middle <- if (length(w) > 1) sum(
+      (w[1:(length(w) - 1)] - 1)^2 *
+      (1 + 10 * sin(pi * w[1:(length(w) - 1)] + 1)^2)
+    ) else 0
+    last <- (w[length(w)] - 1)^2 * (1 + sin(2 * pi * w[length(w)])^2)
+    first + middle + last
+  },
+  schwefel = function(x) {
+    optimum_x <- 420.9687462275036
+    optimum_term <- optimum_x * sin(sqrt(optimum_x))
+    bounded <- pmin(500, pmax(-500, x))
+    sum(optimum_term - bounded * sin(sqrt(abs(bounded)))) +
+      sum((x - bounded)^2)
+  },
+  highconditionedellipsoid = function(x) {
+    d <- length(x)
+    exponent <- 6 * (seq_len(d) - 1) / max(d - 1, 1)
+    sum((10^exponent) * x^2)
   }
 )
 
@@ -41,7 +63,10 @@ base_objective <- list(
   ackley = c(-32.768, 32.768),
   griewank = c(-600.0, 600.0),
   zakharov = c(-5.0, 10.0),
-  rosenbrock = c(-5.0, 10.0)
+  rosenbrock = c(-5.0, 10.0),
+  levy = c(-10.0, 10.0),
+  schwefel = c(-500.0, 500.0),
+  highconditionedellipsoid = c(-5.0, 5.0)
 )
 
 .norm_key <- function(name) {
@@ -51,7 +76,9 @@ base_objective <- list(
 }
 
 base_optimum_x <- function(name, dim) {
-  if (.norm_key(name) == "rosenbrock") return(rep(1.0, dim))
+  key <- .norm_key(name)
+  if (key %in% c("rosenbrock", "levy")) return(rep(1.0, dim))
+  if (key == "schwefel") return(rep(420.9687462275036, dim))
   rep(0.0, dim)
 }
 

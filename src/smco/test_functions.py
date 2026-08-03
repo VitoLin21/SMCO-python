@@ -107,15 +107,22 @@ _SCHWEFEL_226_OPTIMUM_TERM = SCHWEFEL_226_OPTIMUM_X * np.sin(
 
 
 def schwefel_226(x: np.ndarray) -> float:
-    """Shifted Schwefel 2.26 with exact floating-point minimum ``0``.
+    """Bounded-domain Schwefel 2.26 with exact global minimum ``0``.
 
     The computation is a sum of per-coordinate differences rather than
     ``constant * d - sum(...)``.  Consequently each term is exactly zero at
-    ``SCHWEFEL_226_OPTIMUM_X`` even in a 10,000-dimensional instance.
+    ``SCHWEFEL_226_OPTIMUM_X`` even in a 10,000-dimensional instance.  The
+    canonical function is defined on ``[-500, 500]^d``.  Optimum-preserving
+    instance transforms can map a feasible outer point beyond that base box,
+    so values outside it use a quadratic extension of the clipped boundary.
+    This leaves the canonical function unchanged inside its standard domain
+    while preventing spurious values below the documented optimum outside it.
     """
     x = np.asarray(x, dtype=float)
-    term = x * np.sin(np.sqrt(np.abs(x)))
-    return float(np.sum(_SCHWEFEL_226_OPTIMUM_TERM - term))
+    bounded = np.clip(x, -500.0, 500.0)
+    term = bounded * np.sin(np.sqrt(np.abs(bounded)))
+    outside_penalty = np.sum((x - bounded) ** 2)
+    return float(np.sum(_SCHWEFEL_226_OPTIMUM_TERM - term) + outside_penalty)
 
 
 def high_conditioned_ellipsoid(x: np.ndarray) -> float:
