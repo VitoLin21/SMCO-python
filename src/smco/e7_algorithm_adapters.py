@@ -164,6 +164,12 @@ def _installed_version(distribution: str) -> str:
         ) from exc
 
 
+def _normalize_r_version(value) -> str:
+    """R packageVersion returns '.'-separated versions while CRAN/metadata may
+    use '-' (e.g. DEoptim '2.2-8' vs R '2.2.8'); normalize before comparing."""
+    return str(value).replace("-", ".")
+
+
 def _preflight_python(algorithm_id: str, metadata: dict) -> None:
     installed = _installed_version(metadata["package"])
     expected = metadata["package_version"]
@@ -252,7 +258,7 @@ class _Rpy2Backend:
                 f"{algorithm_id} requires R package {package}=="
                 f"{expected}; package is not installed"
             ) from exc
-        if installed != expected:
+        if _normalize_r_version(installed) != _normalize_r_version(expected):
             raise UnsupportedAlgorithmError(
                 f"{algorithm_id} requires R package {package}=={expected}; "
                 f"installed={installed}"

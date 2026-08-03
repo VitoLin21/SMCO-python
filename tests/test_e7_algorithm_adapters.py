@@ -298,3 +298,27 @@ def test_r_backend_appends_user_library_to_libpaths(monkeypatch, tmp_path):
     appended = [c for c in calls if ".libPaths(c(" in c]
     assert appended, calls
     assert str(tmp_path) in appended[0]
+
+
+def test_r_preflight_normalizes_version_separator():
+    """R packageVersion returns '.'-separated versions (e.g. '2.2.8') while
+    CRAN/metadata uses '-' (e.g. DEoptim '2.2-8'); preflight must normalize the
+    separator before comparing, else DEoptim is rejected as a mismatch."""
+    from smco.e7_algorithm_adapters import _Rpy2Backend
+
+    class FakeRO:
+        def r(self, expr):
+            if "R.version" in expr:
+                return ["4.5.2"]
+            if "packageVersion" in expr:
+                return ["2.2.8"]  # R-style '.' separator
+            return None
+
+    backend = _Rpy2Backend.__new__(_Rpy2Backend)
+    backend.ro = FakeRO()
+    backend._R_VERSION = "4.5.2"
+    # expected CRAN '2.2-8' vs installed R '2.2.8' -> must pass (no raise)
+    backend.preflight(
+        algorithm_id="R-DEoptim",
+        metadata={"package": "DEoptim", "package_version": "2.2-8"},
+    )
