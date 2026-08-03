@@ -54,5 +54,6 @@ def test_consolidated_report_traces_all_evidence(tmp_path):
     assert "| DE |" in text and "0.0" in text                   # pairwise winner-opponent
     # GenSA row: winner is algorithm_b -> diff flipped to -0.05
     assert "| GenSA |" in text and "-0.05" in text
+    assert "| GenSA | 60 | -0.0500 | 0.65 | 1.0 |" in text
     assert "E4 bbob-largescale" in text and "E5 bbob low-dim" in text  # COCO sections
     assert "Honest boundaries" in text                          # framing
