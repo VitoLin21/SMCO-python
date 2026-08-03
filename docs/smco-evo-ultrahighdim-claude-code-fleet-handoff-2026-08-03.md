@@ -28,30 +28,28 @@
 
 ## 2. Fleet 与目录约定
 
-权威服务器清单为 `docs/smco-fleet-servers.md`。本 campaign 使用七台机器：
+权威服务器清单为 `docs/smco-fleet-servers.md`。本 campaign 使用十一台机器：
 
 - 本机 coordinator/worker：`/amax/math/code/SMCO`，24 核；
-- `10.16.144.213`：`/amax/math/code/SMCO`；
-- `10.16.144.214`：`/amax/math/code/SMCO`，当前需密码方式 SSH；
-- `10.16.144.215`：`/amax/math/code/SMCO`，已有 R 高维运行经验；
-- `10.16.144.217`：`/amax/math/code/SMCO`；
+- `m213/m214/m215/m217`：`~/code/SMCO`；
 - `10.25.40.251`：`/data/math/code/SMCO`，48 核，高维主力；
-- `10.25.40.253`：路径、CPU、内存、key 和环境尚未实测，必须先通过完整 preflight。
+- `m253`：`~/code/SMCO`，48 核，Python/cocoex 已部署，正式 E7 前仍需补齐 R 合同；
+- `zf129/zf132/zf133/zf852`：`~/code/SMCO`，每台 128 逻辑核、64 物理核、503 GB 内存。
 
 用户名和认证由 operator 在外部配置；不要把密码写入脚本、日志、manifest 或本文档。
 
 统一目录：
 
 ```bash
-REPO=/amax/math/code/SMCO     # 251 必须改为 /data/math/code/SMCO
+REPO=/amax/math/code/SMCO     # 内网远端/zftest 用 $HOME/code/SMCO；251 用 /data/math/code/SMCO
 EXT_ROOT=$REPO/result/smco-evo-ultrahighdim-2026
 SELECTION=$REPO/result/e1-2026-07-30/selection/selection.json
 FROZEN_SHA=$(git -C "$REPO" rev-parse HEAD)
 ```
 
-七台机器不共享 NFS，不能用本机文件是否存在判断远端完成情况。必须以 rsync 分发并回收 `src/`、`scripts/`、`vendor/`、manifest、shards 和 instances。各节点绝对路径可以不同，但 repo-relative artifact 布局和文件 SHA-256 必须相同。结果目录按节点和 shard 隔离，例如 `e7/evidence_213_s002`；禁止多个 dispatch 写同一 evidence root。
+十一台机器不共享 NFS，不能用本机文件是否存在判断远端完成情况。必须以 rsync 分发并回收 `src/`、`scripts/`、`vendor/`、manifest、shards 和 instances。各节点绝对路径可以不同，但 repo-relative artifact 布局和文件 SHA-256 必须相同。结果目录按节点和 shard 隔离，例如 `e7/evidence_213_s002`；禁止多个 dispatch 写同一 evidence root。
 
-253 是条件节点：只有 SSH、代码路径、磁盘、Python、R、内存和真实 smoke 全部通过后才领取正式 shard；否则其 shard 原样转给 251 或最先空闲且环境合格的节点，不改 manifest/run-id。
+zftest 的 evidence 不放在接近满载的 root 盘：zf129/zf133/zf852 使用 `/data/zftest/result/smco-evo-ultrahighdim-2026`，无 `/data` 的 zf132 使用 `~/result/smco-evo-ultrahighdim-2026`。实例仍同步到 repo-relative 路径，以便 manifest 中的 artifact 路由保持一致。
 
 ## 3. 依赖预检
 
@@ -67,7 +65,9 @@ PY
 Rscript -e 'cat(R.version$major,".",R.version$minor,"\n",sep=""); print(packageVersion("DEoptim")); print(packageVersion("nloptr"))'
 ```
 
-冻结版本为 SciPy `1.17.1`、R `4.3.2`、rpy2 `3.6.4`、DEoptim `2.2-8`、nloptr `2.2.1`。服务器清单显示 215/251 当前是 R `4.5.2`，所以它们也**尚未通过**当前 frozen R adapter 的正式 gate。应在七节点部署隔离的 R 4.3.2 环境并重做 smoke；若决定改用 4.5.2，必须先修改并重新冻结算法合同、测试、commit、manifest，不能在同一 manifest 下混跑两个 R 版本。不得用同名 Python 算法替代 R-DEoptim/STOGO。
+当前代码冻结 SciPy `1.17.1`、R `4.3.2`、rpy2 `3.6.4`、DEoptim `2.2-8`、nloptr `2.2.1`，但权威 fleet 文档显示 9 台远端 R 节点已经统一为 R `4.5.2`；本机仍是 R 4.3.2 且缺 R 包/rpy2，253 尚未具备 R 环境。**推荐在生成 manifest 前把 E7 R adapter 合同统一改冻到 R 4.5.2**，补测试并形成新的 40-hex `FROZEN_SHA`，再给本机和 253 部署同版本。若坚持 4.3.2，则需在全部十一台节点部署隔离环境。两种方案只能选一种，不能在同一 manifest 下混跑。
+
+服务器文档所称“5 个 R 包”不包含 STOGO 所需的 `nloptr`；每节点还必须实测安装 `nloptr==2.2.1` 和 Python `rpy2==3.6.4`。任何一个 full-bundle 节点缺少 R/DEoptim/nloptr/rpy2 时不得领取正式 shard，也不得把 `unsupported_dependency` 当作算法性能结果。不得用同名 Python算法替代 R-DEoptim/STOGO。
 
 建议同时记录：CPU、物理核、内存、BLAS、`pip freeze`、`R sessionInfo()` 和环境 hash。正式进程设置单线程 BLAS：
 
@@ -110,7 +110,7 @@ mkdir -p "$EXT_ROOT/e3f_instances" "$EXT_ROOT/e7_high_instances" "$EXT_ROOT/inde
 
 E7 composer 的语义不可改变：原四函数 d=1000 来自旧 E3 confirmatory index；新增四函数 d=1000 来自 E3-F；d=2000--10000 来自新的 extension-confirmatory index。
 
-## 5. 冻结 manifest 与七节点 shard
+## 5. 冻结 manifest 与十一节点 shard
 
 ```bash
 mkdir -p "$EXT_ROOT/e3f" "$EXT_ROOT/e7"
@@ -124,7 +124,7 @@ mkdir -p "$EXT_ROOT/e3f" "$EXT_ROOT/e7"
   --instances-index "$EXT_ROOT/indexes/e3f_instances_index.json" \
   --out "$EXT_ROOT/e3f/manifest.json"
 .venv/bin/python scripts/run_smco_evo_ultrahighdim_extension.py shard \
-  --manifest "$EXT_ROOT/e3f/manifest.json" --n-shards 14 \
+  --manifest "$EXT_ROOT/e3f/manifest.json" --n-shards 42 \
   --out "$EXT_ROOT/e3f/shards.json"
 
 .venv/bin/python scripts/run_smco_evo_ultrahighdim_extension.py manifest \
@@ -136,31 +136,35 @@ mkdir -p "$EXT_ROOT/e3f" "$EXT_ROOT/e7"
   --instances-index "$EXT_ROOT/indexes/e7_instances_index.json" \
   --out "$EXT_ROOT/e7/manifest.json"
 .venv/bin/python scripts/run_smco_evo_ultrahighdim_extension.py shard \
-  --manifest "$EXT_ROOT/e7/manifest.json" --n-shards 14 \
+  --manifest "$EXT_ROOT/e7/manifest.json" --n-shards 42 \
   --out "$EXT_ROOT/e7/shards.json"
 ```
 
-检查 stdout：E3-F=`420`，E7=`1736`，两者 `errors=[]`。保留 manifest/shard SHA。先为每个 shard 执行一次 `dispatch --dry-run`，确认 14 shard union 等于 manifest 且互不重叠。
+检查 stdout：E3-F=`420`，E7=`1736`，两者 `errors=[]`。保留 manifest/shard SHA。先为每个 shard 执行一次 `dispatch --dry-run`，确认 42 shard union 等于 manifest 且互不重叠。
 
-采用 14 个 shard 而不是 7 个 shard，是为了给 48 核的 251 多分一份、降低 253 预检失败时的迁移粒度，并允许先完成的节点接管尚未启动的 shard。Shard 一旦开始运行不得拆分；只能整体迁移尚未启动的 shard。若 pilot 产生了 bundle cost 文件，生成 E7 shards 时增加 `--cost-estimates <pilot-costs.json>`；否则默认 cost 仍会保持 problem bundle 完整并按维度 FE 近似平衡。
+42 shards 在十一台机器间按能力加权：四台 zftest 各 6 份，251/253 各 4 份，其余节点各 2 份。四台 zftest 因而承担 E7 的 1104/1736 tasks（约 64%），与其 512 个逻辑核的地位相符，同时保留足够小的迁移单位。Shard 一旦开始运行不得拆分；只能整体迁移尚未启动的 shard。若 pilot 产生 bundle cost 文件，生成 E7 shards 时增加 `--cost-estimates <pilot-costs.json>`；否则默认 cost 仍保持 problem bundle 完整并按维度 FE 近似平衡。
 
 ## 6. Fleet 派发模板
 
 E3-F 与 E7 使用相同的初始映射，但各自具有独立的 `shards.json`：
 
-| 节点 | 初始 shards | E3-F tasks | E7 tasks | dispatch 数 × 每 dispatch workers | 初始总并发上限 | 说明 |
+| 节点 | 初始 shards | E3-F tasks | E7 tasks | dispatch 数 × 每 dispatch workers | 初始总并发 | 硬限制/说明 |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
-| 本机 | `000,001` | 42 | 216 | `2×3` | 6 | 24 核；保留资源做 coordinator、监控和 merge |
-| 213 | `002,003` | 42 | 216 | `2×2` | 4 | 非共享 NFS，需单独同步/回收 |
-| 214 | `004,005` | 56 | 266 | `2×2` | 4 | 密码 SSH；先确认后台脱离和回收流程 |
-| 215 | `006,007` | 70 | 266 | `2×4` | 8 | R 高维经验节点；仍须满足 frozen R 版本 |
-| 217 | `008,009` | 70 | 256 | `2×3` | 6 | startsweep 主力，先测当前内存/负载 |
-| 251 | `010,011,012` | 105 | 386 | `3×4` | 12 | 48 核高维主力；路径为 `/data/math/code/SMCO` |
-| 253 | `013` | 35 | 130 | `1×4` | 4（暂定） | 通过完整 preflight 后才启动；失败则整体转移 |
+| 本机 | `000–001` | 14 | 72 | `2×5` | 10 | 用户硬上限为 24 核的 1/2，即最多 12；预留 2 核额度给 coordinator/merge |
+| 213 | `002–003` | 14 | 72 | `2×3` | 6 | 非共享 NFS，单独同步/回收 |
+| 214 | `004–005` | 14 | 68 | `2×3` | 6 | key 免密已就绪，仍须做真实 R smoke |
+| 215 | `006–007` | 14 | 68 | `2×5` | 10 | R 高维经验节点 |
+| 217 | `008–009` | 14 | 58 | `2×4` | 8 | 先检查当前负载 |
+| 251 | `010–013` | 28 | 130 | `4×6` | 24 | 48 核高维主力；`/data/math/code/SMCO` |
+| 253 | `014–017` | 28 | 164 | `4×6` | 24 | 48 核；补齐 R/nloptr/rpy2 后启动 |
+| zf129 | `018–023` | 70 | 246 | `6×10` | 60 | 用户硬上限为 128 逻辑核的 3/5，即最多 76；同时不超过 64 物理核 |
+| zf132 | `024–029` | 84 | 246 | `6×10` | 60 | 用户硬上限同为最多 76；无 `/data`，输出放 `~/result` |
+| zf133 | `030–035` | 70 | 294 | `6×10` | 60 | 64 物理核，503 GB |
+| zf852 | `036–041` | 70 | 318 | `6×10` | 60 | 64 物理核，503 GB |
 
-上述行精确合计 E3-F `420` tasks、E7 `1736` tasks。E7 默认 FE cost 下每 shard 约 `5.60--5.65×10^8 FE`；251 获得三份是基于其已知 48 核和既往 3000/5000D 经验，253 只获得一份是因为环境尚未核实。初始总并发为 44。表中是安全起点，不是必须占满的固定值：真实 d=10000 R-DEoptim RSS smoke 后可上调或下调，但同一节点所有 dispatch 的 workers 之和不得超过节点总并发上限。E3-F 全部 audit pass 后再正式派 E7。不要盲目按逻辑核全部拉满，尤其 R-DEoptim 的 `512×d` 种群与多份 R bridge 拷贝会叠加内存。
+上述行精确合计 E3-F `420` tasks、E7 `1736` tasks。E7 每 shard 默认 cost 约 `1.85--2.04×10^8 FE`，四台 zftest 各承担约 `1.11×10^9 FE`。初始总并发为 328；其中本机 10≤12，zf129/zf132 各 60≤76，满足用户给定上限。上限按整台机器所有 SMCO 进程合计计算，不是每个 dispatch 单独计算。真实 d=10000 R-DEoptim RSS smoke 后可以下调；任何时候不得上调越过表中硬限制。E3-F 全部 audit pass 后再正式派 E7。
 
-节点模板（以 E7/213 的 `shard-002` 为例；`shard-003` 使用独立 evidence/log 并另起一个 `--workers 2` dispatch）：
+节点模板（以 E7/213 的 `shard-002` 为例；`shard-003` 使用独立 evidence/log 并另起一个 `--workers 3` dispatch）：
 
 ```bash
 cd "$REPO"
@@ -172,7 +176,7 @@ nohup .venv/bin/python scripts/run_smco_evo_ultrahighdim_extension.py dispatch \
   --instance-root "$REPO" \
   --evidence-root "$EXT_ROOT/e7/evidence_213_s002" \
   --shards "$EXT_ROOT/e7/shards.json" --shard-id shard-002 \
-  --workers 2 --machine-id "$MACHINE_ID" \
+  --workers 3 --machine-id "$MACHINE_ID" \
   --git-commit "$FROZEN_SHA" --environment-hash "$ENV_HASH" \
   > "$EXT_ROOT/e7/dispatch_213_s002.log" 2>&1 &
 ```
@@ -196,7 +200,7 @@ nohup .venv/bin/python scripts/run_smco_evo_ultrahighdim_extension.py dispatch \
 
 ## 8. Merge、composite 与最终 index
 
-E3-F 七节点、14 个 evidence root 不能用最后一个参数覆盖前面的目录。当前 merge 接受单 evidence root，因此先把 14 个互斥 shard 的 run-id 目录汇集到 coordinator 的 `evidence_all/`（复制/rsync 时拒绝同名冲突；`_task_cache` 不作为结果合并依据），再执行：
+E3-F 十一节点、42 个 evidence root 不能用最后一个参数覆盖前面的目录。当前 merge 接受单 evidence root，因此先把 42 个互斥 shard 的 run-id 目录汇集到 coordinator 的 `evidence_all/`（复制/rsync 时拒绝同名冲突；`_task_cache` 不作为结果合并依据），再执行：
 
 ```bash
 .venv/bin/python scripts/run_smco_evo_ultrahighdim_extension.py merge \
