@@ -140,7 +140,8 @@ PAIRWISE_BOOTSTRAPS = 2000
 
 _PAIRWISE_FIELDS = [
     "algorithm_a", "algorithm_b", "n_pairs", "median_log_gap_diff",
-    "diff_ci_lo", "diff_ci_hi", "prob_a_better", "p_value", "p_holm",
+    "diff_ci_lo", "diff_ci_hi", "prob_a_better", "prob_b_better",
+    "tie_rate", "p_value", "p_holm",
 ]
 
 
@@ -205,10 +206,13 @@ def pairwise_table(rows, algorithms, *, n_boot: int = PAIRWISE_BOOTSTRAPS,
         diffs = [paired[a][k] - paired[b][k] for k in shared]
         median_diff, p, (lo, hi) = _paired_median_test(diffs, rng=rng, n_boot=n_boot)
         prob_a_better = float(np.mean([d < 0 for d in diffs])) if diffs else None
+        prob_b_better = float(np.mean([d > 0 for d in diffs])) if diffs else None
+        tie_rate = float(np.mean([d == 0 for d in diffs])) if diffs else None
         out.append({
             "algorithm_a": a, "algorithm_b": b, "n_pairs": len(diffs),
             "median_log_gap_diff": median_diff, "diff_ci_lo": lo, "diff_ci_hi": hi,
-            "prob_a_better": prob_a_better, "p_value": p,
+            "prob_a_better": prob_a_better, "prob_b_better": prob_b_better,
+            "tie_rate": tie_rate, "p_value": p,
         })
         if p is not None:
             pvals.append(p)

@@ -34,11 +34,13 @@ def test_consolidated_report_traces_all_evidence(tmp_path):
                [{"algorithm_id": "PY-SP-SMCO-EVO", "n_runs": 60}])
     _write_csv(e3 / "pairwise_table.csv",
                ["algorithm_a", "algorithm_b", "n_pairs", "median_log_gap_diff",
-                "prob_a_better", "p_holm"],
+                "prob_a_better", "prob_b_better", "tie_rate", "p_holm"],
                [{"algorithm_a": "PY-SP-SMCO-EVO", "algorithm_b": "DE", "n_pairs": 60,
-                 "median_log_gap_diff": "-1.1", "prob_a_better": "0.98", "p_holm": "0.0"},
+                 "median_log_gap_diff": "-1.1", "prob_a_better": "0.83",
+                 "prob_b_better": "0.02", "tie_rate": "0.15", "p_holm": "0.0"},
                 {"algorithm_a": "GenSA", "algorithm_b": "PY-SP-SMCO-EVO", "n_pairs": 60,
-                 "median_log_gap_diff": "0.05", "prob_a_better": "0.35", "p_holm": "1.0"}])
+                 "median_log_gap_diff": "0.05", "prob_a_better": "0.35",
+                 "prob_b_better": "0.50", "tie_rate": "0.15", "p_holm": "1.0"}])
     for name in ("e4", "e5"):
         _write_csv(tmp_path / f"{name}.csv",
                    ["algorithm_id", "n_runs", "final_target_hit_rate", "median_fe_used"],
@@ -54,6 +56,6 @@ def test_consolidated_report_traces_all_evidence(tmp_path):
     assert "| DE |" in text and "0.0" in text                   # pairwise winner-opponent
     # GenSA row: winner is algorithm_b -> diff flipped to -0.05
     assert "| GenSA |" in text and "-0.05" in text
-    assert "| GenSA | 60 | -0.0500 | 0.65 | 1.0 |" in text
+    assert "| GenSA | 60 | -0.0500 | 0.50 | 1.0 |" in text
     assert "E4 bbob-largescale" in text and "E5 bbob low-dim" in text  # COCO sections
     assert "Honest boundaries" in text                          # framing

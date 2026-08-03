@@ -55,18 +55,11 @@ def build(selection_path, e3_dir, e4_summary, e5_summary, out_path) -> Path:
         if opp is None:
             continue
         diff = r.get("median_log_gap_diff", "")
-        prob = r.get("prob_a_better", "")
+        prob = r.get("prob_a_better", "") if a == winner else r.get("prob_b_better", "")
         # flip sign when the winner is algorithm_b so the diff is always winner-opponent
         if b == winner and diff not in ("", None):
             try:
                 diff = f"{-float(diff):.4f}"
-            except (TypeError, ValueError):
-                pass
-        # ``prob_a_better`` is directional too; report the probability for the
-        # winner, not for whichever algorithm happens to be column A.
-        if b == winner and prob not in ("", None):
-            try:
-                prob = f"{1.0 - float(prob):.16g}"
             except (TypeError, ValueError):
                 pass
         lines.append(f"| {opp} | {r.get('n_pairs','')} | {diff} | "
