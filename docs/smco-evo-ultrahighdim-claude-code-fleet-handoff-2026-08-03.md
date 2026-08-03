@@ -28,26 +28,30 @@
 
 ## 2. Fleet 与目录约定
 
-已知节点：
+权威服务器清单为 `docs/smco-fleet-servers.md`。本 campaign 使用七台机器：
 
-- `10.16.144.213`
-- `10.16.144.214`
-- `10.16.144.215`
-- `10.16.144.217`
-- `10.25.40.251`
+- 本机 coordinator/worker：`/amax/math/code/SMCO`，24 核；
+- `10.16.144.213`：`/amax/math/code/SMCO`；
+- `10.16.144.214`：`/amax/math/code/SMCO`，当前需密码方式 SSH；
+- `10.16.144.215`：`/amax/math/code/SMCO`，已有 R 高维运行经验；
+- `10.16.144.217`：`/amax/math/code/SMCO`；
+- `10.25.40.251`：`/data/math/code/SMCO`，48 核，高维主力；
+- `10.25.40.253`：路径、CPU、内存、key 和环境尚未实测，必须先通过完整 preflight。
 
 用户名和认证由 operator 在外部配置；不要把密码写入脚本、日志、manifest 或本文档。
 
 统一目录：
 
 ```bash
-REPO=/amax/math/code/SMCO
+REPO=/amax/math/code/SMCO     # 251 必须改为 /data/math/code/SMCO
 EXT_ROOT=$REPO/result/smco-evo-ultrahighdim-2026
 SELECTION=$REPO/result/e1-2026-07-30/selection/selection.json
 FROZEN_SHA=$(git -C "$REPO" rev-parse HEAD)
 ```
 
-每个节点的 checkout、instance artifact 和 shard 文件必须位于相同绝对路径。结果目录按节点隔离，例如 `e7/evidence_213`；禁止多个节点写同一 evidence root。
+七台机器不共享 NFS，不能用本机文件是否存在判断远端完成情况。必须以 rsync 分发并回收 `src/`、`scripts/`、`vendor/`、manifest、shards 和 instances。各节点绝对路径可以不同，但 repo-relative artifact 布局和文件 SHA-256 必须相同。结果目录按节点和 shard 隔离，例如 `e7/evidence_213_s002`；禁止多个 dispatch 写同一 evidence root。
+
+253 是条件节点：只有 SSH、代码路径、磁盘、Python、R、内存和真实 smoke 全部通过后才领取正式 shard；否则其 shard 原样转给 251 或最先空闲且环境合格的节点，不改 manifest/run-id。
 
 ## 3. 依赖预检
 
@@ -63,7 +67,7 @@ PY
 Rscript -e 'cat(R.version$major,".",R.version$minor,"\n",sep=""); print(packageVersion("DEoptim")); print(packageVersion("nloptr"))'
 ```
 
-冻结版本为 SciPy `1.17.1`、R `4.3.2`、rpy2 `3.6.4`、DEoptim `2.2-8`、nloptr `2.2.1`。若节点不满足，先安装并重做 smoke；不得用同名 Python 算法替代 R-DEoptim/STOGO。
+冻结版本为 SciPy `1.17.1`、R `4.3.2`、rpy2 `3.6.4`、DEoptim `2.2-8`、nloptr `2.2.1`。服务器清单显示 215/251 当前是 R `4.5.2`，所以它们也**尚未通过**当前 frozen R adapter 的正式 gate。应在七节点部署隔离的 R 4.3.2 环境并重做 smoke；若决定改用 4.5.2，必须先修改并重新冻结算法合同、测试、commit、manifest，不能在同一 manifest 下混跑两个 R 版本。不得用同名 Python 算法替代 R-DEoptim/STOGO。
 
 建议同时记录：CPU、物理核、内存、BLAS、`pip freeze`、`R sessionInfo()` 和环境 hash。正式进程设置单线程 BLAS：
 
@@ -106,7 +110,7 @@ mkdir -p "$EXT_ROOT/e3f_instances" "$EXT_ROOT/e7_high_instances" "$EXT_ROOT/inde
 
 E7 composer 的语义不可改变：原四函数 d=1000 来自旧 E3 confirmatory index；新增四函数 d=1000 来自 E3-F；d=2000--10000 来自新的 extension-confirmatory index。
 
-## 5. 冻结 manifest 与五节点 shard
+## 5. 冻结 manifest 与七节点 shard
 
 ```bash
 mkdir -p "$EXT_ROOT/e3f" "$EXT_ROOT/e7"
@@ -120,7 +124,7 @@ mkdir -p "$EXT_ROOT/e3f" "$EXT_ROOT/e7"
   --instances-index "$EXT_ROOT/indexes/e3f_instances_index.json" \
   --out "$EXT_ROOT/e3f/manifest.json"
 .venv/bin/python scripts/run_smco_evo_ultrahighdim_extension.py shard \
-  --manifest "$EXT_ROOT/e3f/manifest.json" --n-shards 5 \
+  --manifest "$EXT_ROOT/e3f/manifest.json" --n-shards 14 \
   --out "$EXT_ROOT/e3f/shards.json"
 
 .venv/bin/python scripts/run_smco_evo_ultrahighdim_extension.py manifest \
@@ -132,17 +136,31 @@ mkdir -p "$EXT_ROOT/e3f" "$EXT_ROOT/e7"
   --instances-index "$EXT_ROOT/indexes/e7_instances_index.json" \
   --out "$EXT_ROOT/e7/manifest.json"
 .venv/bin/python scripts/run_smco_evo_ultrahighdim_extension.py shard \
-  --manifest "$EXT_ROOT/e7/manifest.json" --n-shards 5 \
+  --manifest "$EXT_ROOT/e7/manifest.json" --n-shards 14 \
   --out "$EXT_ROOT/e7/shards.json"
 ```
 
-检查 stdout：E3-F=`420`，E7=`1736`，两者 `errors=[]`。保留 manifest/shard SHA。先为每个 shard 执行一次 `dispatch --dry-run`，确认五 shard union 等于 manifest 且互不重叠。
+检查 stdout：E3-F=`420`，E7=`1736`，两者 `errors=[]`。保留 manifest/shard SHA。先为每个 shard 执行一次 `dispatch --dry-run`，确认 14 shard union 等于 manifest 且互不重叠。
+
+采用 14 个 shard 而不是 7 个 shard，是为了给 48 核的 251 多分一份、降低 253 预检失败时的迁移粒度，并允许先完成的节点接管尚未启动的 shard。Shard 一旦开始运行不得拆分；只能整体迁移尚未启动的 shard。若 pilot 产生了 bundle cost 文件，生成 E7 shards 时增加 `--cost-estimates <pilot-costs.json>`；否则默认 cost 仍会保持 problem bundle 完整并按维度 FE 近似平衡。
 
 ## 6. Fleet 派发模板
 
-建议固定映射：213→`shard-000`、214→`shard-001`、215→`shard-002`、217→`shard-003`、251→`shard-004`。E3-F 全部 audit pass 后再正式派 E7。每节点并发数先根据内存 smoke 决定；不要盲目按逻辑核全部拉满，尤其 R-DEoptim 的 512×d 种群与多份 R bridge 拷贝会叠加内存。
+E3-F 与 E7 使用相同的初始映射，但各自具有独立的 `shards.json`：
 
-节点模板（以 E7/213 为例）：
+| 节点 | 初始 shards | E3-F tasks | E7 tasks | dispatch 数 × 每 dispatch workers | 初始总并发上限 | 说明 |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| 本机 | `000,001` | 42 | 216 | `2×3` | 6 | 24 核；保留资源做 coordinator、监控和 merge |
+| 213 | `002,003` | 42 | 216 | `2×2` | 4 | 非共享 NFS，需单独同步/回收 |
+| 214 | `004,005` | 56 | 266 | `2×2` | 4 | 密码 SSH；先确认后台脱离和回收流程 |
+| 215 | `006,007` | 70 | 266 | `2×4` | 8 | R 高维经验节点；仍须满足 frozen R 版本 |
+| 217 | `008,009` | 70 | 256 | `2×3` | 6 | startsweep 主力，先测当前内存/负载 |
+| 251 | `010,011,012` | 105 | 386 | `3×4` | 12 | 48 核高维主力；路径为 `/data/math/code/SMCO` |
+| 253 | `013` | 35 | 130 | `1×4` | 4（暂定） | 通过完整 preflight 后才启动；失败则整体转移 |
+
+上述行精确合计 E3-F `420` tasks、E7 `1736` tasks。E7 默认 FE cost 下每 shard 约 `5.60--5.65×10^8 FE`；251 获得三份是基于其已知 48 核和既往 3000/5000D 经验，253 只获得一份是因为环境尚未核实。初始总并发为 44。表中是安全起点，不是必须占满的固定值：真实 d=10000 R-DEoptim RSS smoke 后可上调或下调，但同一节点所有 dispatch 的 workers 之和不得超过节点总并发上限。E3-F 全部 audit pass 后再正式派 E7。不要盲目按逻辑核全部拉满，尤其 R-DEoptim 的 `512×d` 种群与多份 R bridge 拷贝会叠加内存。
+
+节点模板（以 E7/213 的 `shard-002` 为例；`shard-003` 使用独立 evidence/log 并另起一个 `--workers 2` dispatch）：
 
 ```bash
 cd "$REPO"
@@ -152,14 +170,16 @@ MACHINE_ID=$(hostname)
 nohup .venv/bin/python scripts/run_smco_evo_ultrahighdim_extension.py dispatch \
   --manifest "$EXT_ROOT/e7/manifest.json" \
   --instance-root "$REPO" \
-  --evidence-root "$EXT_ROOT/e7/evidence_213" \
-  --shards "$EXT_ROOT/e7/shards.json" --shard-id shard-000 \
-  --workers 4 --machine-id "$MACHINE_ID" \
+  --evidence-root "$EXT_ROOT/e7/evidence_213_s002" \
+  --shards "$EXT_ROOT/e7/shards.json" --shard-id shard-002 \
+  --workers 2 --machine-id "$MACHINE_ID" \
   --git-commit "$FROZEN_SHA" --environment-hash "$ENV_HASH" \
-  > "$EXT_ROOT/e7/dispatch_213.log" 2>&1 &
+  > "$EXT_ROOT/e7/dispatch_213_s002.log" 2>&1 &
 ```
 
 不要使用 shell `timeout`、scheduler walltime kill 或 72h 后 `pkill`。基础设施失败才允许同 run_id 新 attempt；恢复命令默认 resume，不要加 `--no-resume`。logical run 的 72h 时钟跨 attempt 累计，不会因 retry 重置。
+
+动态接管规则：只允许接管 `dispatch --dry-run` 显示全部 pending、且原节点确认从未启动的整个 shard。记录 `old_assignment/new_assignment/reason/timestamp`。已经产生 attempt ledger 的 run-id 只能按 retry 合同迁移，不能当作全新 task 重新派发。
 
 ## 7. 监控清单
 
@@ -176,7 +196,7 @@ nohup .venv/bin/python scripts/run_smco_evo_ultrahighdim_extension.py dispatch \
 
 ## 8. Merge、composite 与最终 index
 
-E3-F 五节点 evidence root 不能用最后一个参数覆盖前四个。当前 merge 接受单 evidence root，因此先把五个互斥 run-id 目录汇集到 coordinator 的 `evidence_all/`（复制/rsync 时拒绝同名冲突），再执行：
+E3-F 七节点、14 个 evidence root 不能用最后一个参数覆盖前面的目录。当前 merge 接受单 evidence root，因此先把 14 个互斥 shard 的 run-id 目录汇集到 coordinator 的 `evidence_all/`（复制/rsync 时拒绝同名冲突；`_task_cache` 不作为结果合并依据），再执行：
 
 ```bash
 .venv/bin/python scripts/run_smco_evo_ultrahighdim_extension.py merge \
