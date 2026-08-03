@@ -1,11 +1,11 @@
-"""Comparison-baseline single-task worker for the high-dim paper (Task 9 / E3).
+"""Comparison-baseline single-task worker for the high-dim paper (E3 / E7).
 
-Runs one strong black-box baseline (DE / GA / PSO / SA / GenSA from
-``src/comparison/methods``) on a loaded high-dim instance under the SAME
-function-evaluation budget as SMCO. FE parity is enforced by a minimisation
-observer that raises :class:`EvaluationBudgetExceeded` at ``fe_budget``, which
-stops the underlying optimiser (scipy or custom loop); the worker then reports
-the best-so-far seen up to that point.
+Runs one frozen comparator on a loaded high-dim instance under the SAME
+function-evaluation budget as SMCO. E7 adds R-DEoptim, STOGO, L-BFGS, SPSA and
+SignGD without changing the identity of the older Python ``DE``. FE parity is
+enforced by one minimisation observer that sees initialization, scipy/R package
+callbacks, numerical gradients and perturbation calls, and raises
+:class:`EvaluationBudgetExceeded` at ``fe_budget``.
 
 The output payload mirrors :mod:`smco.highdim_worker` (best_value in
 minimisation sense, relative target_hit_fe, anytime checkpoints) so the merge
@@ -30,6 +30,12 @@ from comparison.methods.ga import genetic_algorithm
 from comparison.methods.gensa import gensa
 from comparison.methods.pso import particle_swarm
 from comparison.methods.sa import simulated_annealing
+from .e7_algorithm_adapters import (
+    E7_ALGORITHM_IDS,
+    UnsupportedAlgorithmError,
+    algorithm_metadata,
+    prepare_e7_adapter,
+)
 from .evaluation import EvaluationBudgetExceeded
 from .highdim_instances import HighDimInstance
 from .paper_contract import NONE_TOKEN
@@ -57,14 +63,19 @@ class _MinObserver:
         self.fe = 0
         self.best_min = math.inf
         self.trace: list[tuple[int, float]] = []
+        self.counts_by_event: dict[str, int] = {}
 
     def __call__(self, x: np.ndarray) -> float:
+        return self.evaluate(x, event="iterate")
+
+    def evaluate(self, x: np.ndarray, *, event: str) -> float:
         if self.fe >= self.max_evals:
             raise EvaluationBudgetExceeded(
                 f"baseline FE budget {self.max_evals} reached"
             )
         value = self.instance.objective(x)
         self.fe += 1
+        self.counts_by_event[event] = self.counts_by_event.get(event, 0) + 1
         if value < self.best_min:
             self.best_min = value
             self.trace.append((self.fe, self.best_min))
@@ -104,6 +115,7 @@ def run_baseline_task(
     machine_id: str = "",
     git_commit: str = "",
     environment_hash: str = "",
+    e7_r_backend=None,
 ) -> dict:
     """Run one baseline under the SMCO FE budget and return the result payload."""
     # P1a: default provenance so every baseline outcome is auditable (the merge
@@ -115,36 +127,118 @@ def run_baseline_task(
     environment_hash = environment_hash or default_environment_hash()
     if not isinstance(instance, HighDimInstance):
         raise TypeError("instance must be a HighDimInstance")
-    if algorithm_name not in _BASELINE_DISPATCH:
+    if algorithm_name not in _BASELINE_DISPATCH and algorithm_name not in E7_ALGORITHM_IDS:
         raise ValueError(f"unknown baseline: {algorithm_name!r}")
-    algorithm = _BASELINE_DISPATCH[algorithm_name]
+    metadata = None
+    try:
+        if algorithm_name in E7_ALGORITHM_IDS:
+            algorithm, metadata = prepare_e7_adapter(
+                algorithm_name, r_backend=e7_r_backend,
+            )
+        else:
+            algorithm = _BASELINE_DISPATCH[algorithm_name]
+    except UnsupportedAlgorithmError as exc:
+        # A missing native package/version is a scientific unsupported case,
+        # not permission to swap in a similarly named Python optimizer.
+        frozen = algorithm_metadata(algorithm_name)
+        return {
+            "algorithm_id": algorithm_name,
+            "algorithm_metadata": frozen,
+            "stage": stage,
+            "function": instance.function_name,
+            "dimension": instance.dimension,
+            "n_starts": int(np.asarray(starts).shape[0]),
+            "known_optimum": float(instance.known_optimum_value),
+            "status": "algorithm_failure",
+            "failure_reason": f"unsupported_dependency: {exc}",
+            "fe_budget": int(fe_budget),
+            "fe_used": 0,
+            "best_value": None,
+            "normalized_gap": None,
+            "objective_sense": "minimize",
+            "target_hit_fe": {label: None for label in _GAP_TARGETS},
+            "anytime": [
+                {
+                    "checkpoint_fe": int(cp), "fe_used": 0,
+                    "best_value": None, "normalized_gap": None,
+                }
+                for cp in checkpoints
+            ],
+            "best_so_far_trace": [],
+            "termination_reason": "error",
+            "fe_counts_by_event": {},
+            "wall_time_sec": 0.0,
+            "peak_memory_mb": None,
+            "machine_id": machine_id,
+            "git_commit": git_commit,
+            "environment_hash": environment_hash,
+            "supersedes_run_id": NONE_TOKEN,
+        }
 
     observer = _MinObserver(instance, fe_budget)
     starts = np.asarray(starts, dtype=float)
-    initial_reference = float(np.median([instance.objective(s) for s in starts]))
+    if starts.ndim != 2 or starts.shape[1] != instance.dimension or starts.shape[0] == 0:
+        raise ValueError(
+            f"starts must have shape (n, {instance.dimension}) with n > 0"
+        )
+    if int(fe_budget) <= 0:
+        raise ValueError("fe_budget must be positive")
+    if np.any(starts < instance.bounds_lower) or np.any(starts > instance.bounds_upper):
+        raise ValueError("all frozen starts must lie inside the instance bounds")
     known_optimum = float(instance.known_optimum_value)
 
     status = "success"
     failure_reason = NONE_TOKEN
     t0 = time.perf_counter()
+    initial_values: list[float] = []
     try:
+        # E7's stricter contract counts initial-reference evaluations as real
+        # objective calls in the same FE pool. Preserve the already-frozen E3
+        # semantics for legacy comparators, whose reference values were
+        # reporting-only and intentionally excluded from FE.
+        for start in starts:
+            if algorithm_name in E7_ALGORITHM_IDS:
+                value = observer.evaluate(start, event="initialization")
+            else:
+                value = instance.objective(start)
+            initial_values.append(value)
+
+        def bounded_objective(x):
+            # Native box handling is frozen per adapter. Defensive clipping
+            # also keeps numerical-gradient/SPSA probes within the contract.
+            point = np.clip(
+                np.asarray(x, dtype=float),
+                instance.bounds_lower,
+                instance.bounds_upper,
+            )
+            return observer.evaluate(point, event="iterate")
+
         algorithm(
-            observer,
+            bounded_objective,
             instance.bounds_lower,
             instance.bounds_upper,
             start_points=starts,
             maximize=False,
-            max_iter=max(int(fe_budget), 1000),
+            max_iter=(int(fe_budget) if algorithm_name in ("R-DEoptim", "STOGO") else
+                      max(int(fe_budget), 1000)),
             seed=int(seed),
         )
     except EvaluationBudgetExceeded:
         pass  # expected hard stop at the FE budget
     except Exception as exc:  # noqa: BLE001 - report, don't crash
-        status = "algorithm_failure"
-        failure_reason = f"{type(exc).__name__}: {exc}"
+        # Exceptions crossing the rpy2 callback boundary may be rewrapped as an
+        # R error. If the shared observer is exactly at cap this is still the
+        # expected evaluation-budget stop, not an algorithm failure.
+        if observer.fe < int(fe_budget):
+            status = "algorithm_failure"
+            failure_reason = f"{type(exc).__name__}: {exc}"
 
     wall_time = time.perf_counter() - t0
     fe_used = observer.fe
+    initial_reference = (
+        float(np.median(initial_values)) if initial_values
+        else (observer.best_min if observer.trace else known_optimum)
+    )
     best_min = observer.best_min if observer.trace else initial_reference
     normalized_gap = _gap(best_min, known_optimum, initial_reference)
 
@@ -169,7 +263,7 @@ def run_baseline_task(
             }
         )
 
-    return {
+    result = {
         "algorithm_id": algorithm_name,
         "stage": stage,
         "function": instance.function_name,
@@ -186,8 +280,14 @@ def run_baseline_task(
         "target_hit_fe": target_hit,
         "anytime": anytime,
         "best_so_far_trace": [[int(fe), float(val)] for fe, val in observer.trace],
-        "termination_reason": "evaluation_budget",
-        "fe_counts_by_event": {},
+        "termination_reason": (
+            "error" if status == "algorithm_failure" else
+            ("evaluation_budget" if fe_used >= int(fe_budget) else "convergence")
+        ),
+        "fe_counts_by_event": (
+            dict(observer.counts_by_event)
+            if algorithm_name in E7_ALGORITHM_IDS else {}
+        ),
         "wall_time_sec": wall_time,
         "peak_memory_mb": None,
         "machine_id": machine_id,
@@ -195,8 +295,11 @@ def run_baseline_task(
         "environment_hash": environment_hash,
         "supersedes_run_id": NONE_TOKEN,
     }
+    if metadata is not None:
+        result["algorithm_metadata"] = metadata
+    return result
 
 
 __all__ = ["run_baseline_task", "BASELINE_NAMES"]
 
-BASELINE_NAMES = tuple(_BASELINE_DISPATCH.keys())
+BASELINE_NAMES = tuple(_BASELINE_DISPATCH.keys()) + E7_ALGORITHM_IDS

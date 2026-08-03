@@ -70,8 +70,11 @@ def test_run_baseline_task_rejects_unknown_algorithm():
         run_baseline_task("CMAES", inst, starts, fe_budget=100, seed=1, checkpoints=(100,))
 
 
-def test_baseline_names_are_the_strong_set():
-    assert set(BASELINE_NAMES) == {"DE", "GA", "PSO", "SA", "GenSA", "CMA-ES"}
+def test_baseline_names_include_legacy_and_e7_comparators():
+    assert set(BASELINE_NAMES) == {
+        "DE", "GA", "PSO", "SA", "GenSA", "CMA-ES",
+        "R-DEoptim", "STOGO", "L-BFGS", "SPSA", "SignGD",
+    }
 
 
 def test_run_baseline_batch_end_to_end(tmp_path):
