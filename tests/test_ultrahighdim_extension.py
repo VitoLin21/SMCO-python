@@ -602,3 +602,24 @@ def test_instance_index_composer_verifies_artifacts_and_rewrites_repo_relative_p
     starts.write_bytes(starts.read_bytes() + b"tamper")
     with pytest.raises(ValueError, match="artifact hash mismatch"):
         module.compose_instance_index("e3f", [source], repo_root=tmp_path)
+
+
+def test_unsupported_dependency_finish_is_retryable():
+    """unsupported_dependency is a deployment gap (missing R runtime/package),
+    not an algorithmic result; a finished attempt carrying it must be retryable
+    so dispatch resumes the run once the environment is fixed (2026-08-03 E7 R
+    fixes). A genuine algorithm_failure stays terminal."""
+    from smco.ultrahighdim_extension import _is_retryable_finish
+
+    assert _is_retryable_finish({
+        "status": "algorithm_failure",
+        "failure_reason": "unsupported_dependency: R-DEoptim requires R package DEoptim==2.2-8; not installed",
+    })
+    assert _is_retryable_finish({"status": "infra_failure", "failure_reason": "x"})
+    assert _is_retryable_finish({"status": "stalled", "failure_reason": "-"})
+    assert not _is_retryable_finish({
+        "status": "algorithm_failure",
+        "failure_reason": "nonfinite objective at x",
+    })
+    assert not _is_retryable_finish({"status": "success"})
+    assert not _is_retryable_finish(None)

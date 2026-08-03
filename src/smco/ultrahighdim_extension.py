@@ -99,6 +99,24 @@ TERMINAL_STATUSES = {"success", "algorithm_failure", "infra_failure"}
 RETRYABLE_STATUSES = {"infra_failure", "node_lost", "stalled"}
 
 
+def _is_retryable_finish(finish) -> bool:
+    """A finished attempt is retryable on infrastructure failure, or when an
+    algorithm_failure is actually an unsupported_dependency (a deployment gap
+    such as a missing R runtime/package) -- that is not an algorithmic result
+    and must be re-run once the environment is fixed. Genuine algorithm
+    failures stay terminal."""
+    if finish is None:
+        return False
+    status = finish.get("status")
+    if status in RETRYABLE_STATUSES:
+        return True
+    if status == "algorithm_failure" and "unsupported_dependency" in str(
+        finish.get("failure_reason", "")
+    ):
+        return True
+    return False
+
+
 def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -778,10 +796,10 @@ class AttemptLedger:
         previous = attempts[-1] if attempts else None
         if previous and previous.get("finish") is None:
             raise ValueError("latest attempt is still running")
-        if previous and previous["finish"].get("status") not in RETRYABLE_STATUSES:
+        if previous and not _is_retryable_finish(previous["finish"]):
             raise ValueError(
                 f"cannot retry terminal status {previous['finish'].get('status')!r}; "
-                "only infrastructure failures may restart"
+                "only infrastructure failures and unsupported dependencies may restart"
             )
         number = len(attempts) + 1
         attempt_id = f"{self.run_id}.a{number:03d}"
@@ -1476,10 +1494,12 @@ def plan_extension_dispatch(tasks: Iterable[Mapping], evidence_root) -> dict:
         if finish is None:
             stall_errors = stalled_attempt_errors(evidence_root, run_id)
             groups["stalled" if not stall_errors else "running"].append(run_id)
-        elif finish.get("status") in {"success", "algorithm_failure"}:
+        elif finish.get("status") == "success":
             groups["completed"].append(run_id)
-        elif finish.get("status") in RETRYABLE_STATUSES:
+        elif _is_retryable_finish(finish):
             groups["retryable"].append(run_id)
+        elif finish.get("status") == "algorithm_failure":
+            groups["completed"].append(run_id)
         else:
             groups["running"].append(run_id)
     return {
