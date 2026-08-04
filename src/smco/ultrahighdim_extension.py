@@ -1509,6 +1509,19 @@ def plan_extension_dispatch(tasks: Iterable[Mapping], evidence_root) -> dict:
     }
 
 
+def _pid_alive(pid: int) -> bool:
+    """Return True if `pid` is a live process on this host."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # process exists but is owned by another user
+    except OSError:
+        return False
+    return True
+
+
 def stalled_attempt_errors(
     evidence_root, run_id: str, *, now_unix_sec: float | None = None,
     stale_after_sec: float = 1200.0, no_fe_growth_window_sec: float = 600.0,
@@ -1546,17 +1559,14 @@ def stalled_attempt_errors(
     latest_unix = float(latest.get("captured_unix_sec", math.inf))
     if now - latest_unix < stale_after_sec:
         errors.append("latest heartbeat is not stale")
-    earlier = next((
-        heartbeat for heartbeat in reversed(history[:-1])
-        if latest_unix - float(heartbeat.get("captured_unix_sec", latest_unix))
-        >= no_fe_growth_window_sec
-    ), None)
-    if earlier is None:
-        errors.append("heartbeat history does not span the no-FE-growth window")
-    elif earlier.get("fe_used") is None or latest.get("fe_used") is None:
-        errors.append("heartbeat history lacks FE progress")
-    elif int(earlier["fe_used"]) != int(latest["fe_used"]):
-        errors.append("FE increased during the no-growth window")
+        return errors
+    # A stale heartbeat is recoverable unless its recorded worker is still
+    # alive. Historical FE growth must NOT pin an open attempt as "running"
+    # forever after the process vanished (P0, 2026-08-04 review): a task that
+    # progressed and then lost its process must restart.
+    pid = (latest.get("process_resources") or {}).get("pid")
+    if pid is not None and _pid_alive(int(pid)):
+        errors.append("worker process recorded in the stale heartbeat is still alive")
     return errors
 
 

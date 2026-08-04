@@ -232,7 +232,9 @@ def test_stalled_recovery_requires_stale_heartbeat_and_no_fe_growth(tmp_path):
     second = ledger.start(machine_id="node2", git_commit="git", environment_hash="env")
     assert second["supersedes_attempt_id"] == first["attempt_id"]
 
-    # FE growth means the infrastructure restart gate stays closed.
+    # FE grew but the recorded worker PID no longer exists -> STILL recoverable
+    # (P0 fix, 2026-08-04 review): a task that made progress and then lost its
+    # process must restart, not be parked as running forever.
     run3 = tmp_path / "r3"
     ledger3 = AttemptLedger(run3 / "attempt_ledger.json", run_id="r3")
     attempt3 = ledger3.start(machine_id="node", git_commit="git", environment_hash="env")
@@ -241,11 +243,29 @@ def test_stalled_recovery_requires_stale_heartbeat_and_no_fe_growth(tmp_path):
     for number, (captured, fe) in enumerate(((0.0, 50), (700.0, 51))):
         heartbeat = {"kind": "heartbeat", "run_id": "r3",
                      "attempt_id": attempt3["attempt_id"],
-                     "captured_unix_sec": captured, "fe_used": fe, "best_value": 2.0}
+                     "captured_unix_sec": captured, "fe_used": fe, "best_value": 2.0,
+                     "process_resources": {"pid": 999999}}
         heartbeat["sidecar_sha256"] = _hash_document(heartbeat, "sidecar_sha256")
         (history3 / f"{number}.json").write_text(json.dumps(heartbeat))
-    assert any("FE increased" in error for error in
-               stalled_attempt_errors(tmp_path, "r3", now_unix_sec=2000.0))
+    assert stalled_attempt_errors(tmp_path, "r3", now_unix_sec=2000.0) == []
+
+    # FE grew AND the recorded worker PID is still alive -> must NOT recover.
+    import os
+    run4 = tmp_path / "r4"
+    ledger4 = AttemptLedger(run4 / "attempt_ledger.json", run_id="r4")
+    attempt4 = ledger4.start(machine_id="node", git_commit="git", environment_hash="env")
+    history4 = run4 / "attempts" / attempt4["attempt_id"] / "heartbeats"
+    history4.mkdir(parents=True)
+    live_pid = os.getpid()  # this test process is alive
+    for number, (captured, fe) in enumerate(((0.0, 50), (700.0, 51))):
+        heartbeat = {"kind": "heartbeat", "run_id": "r4",
+                     "attempt_id": attempt4["attempt_id"],
+                     "captured_unix_sec": captured, "fe_used": fe, "best_value": 2.0,
+                     "process_resources": {"pid": live_pid}}
+        heartbeat["sidecar_sha256"] = _hash_document(heartbeat, "sidecar_sha256")
+        (history4 / f"{number}.json").write_text(json.dumps(heartbeat))
+    assert any("alive" in error for error in
+               stalled_attempt_errors(tmp_path, "r4", now_unix_sec=2000.0))
 
 
 def test_supervisor_crosses_deadline_without_killing_process(tmp_path):
