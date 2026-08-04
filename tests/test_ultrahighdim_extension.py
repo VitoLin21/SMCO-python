@@ -712,6 +712,7 @@ def test_unsupported_dependency_recovers_via_superseding_attempt_e2e(tmp_path):
     a2 = ledger_u.start(machine_id="n2", git_commit="g", environment_hash="e")
     assert a2["supersedes_attempt_id"] == a1["attempt_id"]
     assert len(ledger_u.attempts()) == 2  # a001 preserved + a002 started
+    assert ledger_u.validate() == []  # the persisted superseding chain is valid too
 
     # genuine algorithm_failure stays completed (not retryable, no supersede)
     run_g = tmp_path / "rG"

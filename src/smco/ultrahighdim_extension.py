@@ -846,6 +846,7 @@ class AttemptLedger:
         open_attempt = None
         last_attempt = None
         last_finish_status = None
+        last_finish_reason = NONE_TOKEN
         for index, event in enumerate(document.get("events", []), start=1):
             if event.get("sequence") != index:
                 errors.append(f"event {index}: sequence mismatch")
@@ -869,9 +870,12 @@ class AttemptLedger:
                         errors.append(f"event {index}: supersedes_attempt_id mismatch")
                     if event.get("supersedes_run_id") != self.run_id:
                         errors.append(f"event {index}: supersedes_run_id mismatch")
-                    if last_finish_status not in RETRYABLE_STATUSES:
+                    if not _is_retryable_finish({
+                        "status": last_finish_status,
+                        "failure_reason": last_finish_reason,
+                    }):
                         errors.append(
-                            f"event {index}: attempt retries non-infrastructure status "
+                            f"event {index}: attempt retries non-retryable status "
                             f"{last_finish_status!r}"
                         )
                 open_attempt = event.get("attempt_id")
@@ -881,6 +885,7 @@ class AttemptLedger:
                     errors.append(f"event {index}: finish does not match open attempt")
                 open_attempt = None
                 last_finish_status = event.get("status")
+                last_finish_reason = event.get("failure_reason", NONE_TOKEN)
                 if last_finish_status not in TERMINAL_STATUSES | {"node_lost", "stalled"}:
                     errors.append(f"event {index}: invalid terminal status")
             else:
