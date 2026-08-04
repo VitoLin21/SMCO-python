@@ -11,3 +11,8 @@ manifests/
 
 # Fleet 服务器参考（含明文访问凭据，勿提交/推送）
 /docs/smco-fleet-servers.md
+
+# 仅限本地的访问凭据与运维私有记录
+/docs/private/
+*.credentials
+*.secrets

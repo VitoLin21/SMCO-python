@@ -27,7 +27,7 @@
 ### 2026-07-20（启动日）
 - 审计 + 规划文档（direction-bug-audit v3、rerun-plan v3）
 - 修正 6 Python + 1 R 脚本（本机编辑）
-- 配置新机 253：sshpass 安装、ssh-copy-id（用户 `Sdumt@us21201`）、探查（48核/java占24/磁盘清理/Python3.8/无R）、rsync uv python + venv + 修符号链接（editable .pth）+ import 验证
+- 新机访问与部署细节已移至受保护的本地运维记录。
 - rsync 修正代码到 5 机
 - 217 冒烟（50D rand1bin quick）：108 task fopt 全负 ✓（Rastrigin -305 vs 修正前 +1617）
 - **启动 highdim-full 5 机分布式**：217→100+5000D, 213→200+4000D, 215→500+3000D, 251→1000+2000D, 253→50D（各 38 核，253 20 核，setsid 后台）
