@@ -1,21 +1,34 @@
 # SMCO-EVO 高维论文实验实现计划
 
 日期：2026-07-28  
-状态：仅供后续智能体执行；本文档本身不授权启动正式实验  
+状态：Task 0--4 已完成；下一主任务为高维实例、manifest 和 pilot
 依赖实验设计：
 [`docs/smco-evo-highdim-paper-experiment-plan-2026-07-28.md`](smco-evo-highdim-paper-experiment-plan-2026-07-28.md)
 
 ## 1. 目标和范围
 
-本计划把实验方案拆成可逐项验收的工程任务。执行者需要完成：
+本计划把实验方案拆成可逐项验收的工程任务。当前核心实现已经完成，
+后续执行者需要集中完成实验基础设施和高维验证：
 
-1. 精确函数评价计数与 hard budget；
-2. Python restart 语义；
-3. R true state-preserving 语义；
-4. Python/R 轨迹和结果合同；
-5. 高维 shift/asymmetry/permutation/block-rotation 实例；
-6. 开发集、确认集、外部基准和消融的 manifest 与 runner；
-7. 统一统计、图表和结果打包。
+1. 高维 shift/asymmetry/permutation/block-rotation 实例；
+2. 开发集选出一个 canonical SMCO-EVO 实现并冻结；
+3. 高维 winner vs matched base 和强基线实验；
+4. 关键机制消融；
+5. 统一统计、图表和结果打包。
+
+## 1.1 当前进度
+
+| Task | 状态 | 提交/验证 |
+| --- | --- | --- |
+| Task 0：结果合同 | 已完成 | `04a155c` |
+| Task 1：Python FE budget | 已完成 | `8d39122`；16 tests passed |
+| Task 2：R FE budget | 已完成 | `8c46776`；R budget tests passed |
+| Task 3：Python restart | 已完成 | `85a4f00`；13 semantics tests passed |
+| Task 4：R state-preserving | 已完成 | `19e6393`；R semantics tests passed |
+| Task 5：跨语言逐轨迹对齐 | 可选/P3 | 只在怀疑实现差异时执行 |
+| Task 6--13 | 待完成 | 当前主线 |
+
+Task 5 不再阻塞 Task 6、manifest、pilot 或正式高维实验。
 
 本计划不要求本轮执行任何代码修改或实验。后续执行智能体应先阅读仓库根目录
 `AGENTS.md`、实验方案、现有 EVO 设计文档和当前 `git status`。
@@ -47,11 +60,10 @@
 1. `feat: add exact objective evaluation budgets`
 2. `feat: add restart semantics for python smco evo`
 3. `feat: add stateful evolutionary scheduler in r`
-4. `test: add cross-language evo trace contracts`
-5. `feat: add reproducible high-dimensional instances`
-6. `feat: add frozen-manifest experiment runners`
-7. `feat: add high-dimensional paper analysis`
-8. `docs+results: package smco evo paper campaign`
+4. `feat: add reproducible high-dimensional instances`
+5. `feat: add frozen-manifest experiment runners`
+6. `feat: add high-dimensional paper analysis`
+7. `docs+results: package smco evo paper campaign`
 
 若执行环境不应提交代码，可以保持同样的变更分组进行交付。
 
@@ -112,7 +124,7 @@ R 侧目前没有完整 `testthat` 工程。第一版可以使用无额外依赖
 
 ## 4. 统一术语和接口
 
-## Task 0：冻结命名和结果合同
+## Task 0：冻结命名和结果合同（已完成）
 
 ### 文件
 
@@ -162,7 +174,7 @@ supersedes_run_id
 
 ## 5. 精确函数评价预算
 
-## Task 1：Python objective counter 和 hard budget
+## Task 1：Python objective counter 和 hard budget（已完成）
 
 ### 文件
 
@@ -264,7 +276,7 @@ evaluation_counts_by_event
 .venv/bin/python -m pytest tests/test_optimizer.py -v
 ```
 
-## Task 2：R objective counter 和 hard budget
+## Task 2：R objective counter 和 hard budget（已完成）
 
 ### 文件
 
@@ -299,7 +311,7 @@ Rscript vendor/SMCO_R/main/tests/test_evaluation_budget.R
 
 ## 6. 两种 EVO 状态语义
 
-## Task 3：Python restart 语义
+## Task 3：Python restart 语义（已完成）
 
 ### 文件
 
@@ -356,7 +368,7 @@ _run_evolutionary_restarts(...)
 - 三个 family 均支持两种语义；
 - BR 总预算在两种语义下都正确。
 
-## Task 4：R true state-preserving 语义
+## Task 4：R true state-preserving 语义（已完成）
 
 ### 文件
 
@@ -433,7 +445,17 @@ Gate B 未通过不得生成 E1 manifest。
 
 ## 7. 跨语言轨迹合同
 
-## Task 5：Portable random tape 与 trace comparator
+## Task 5：Portable random tape 与 trace comparator（可选诊断，P3）
+
+本任务不属于论文最小可投稿版本，也不阻塞 Task 6--13。只有在以下情况之一发生时执行：
+
+- Python/R 开发结果差距大到无法用随机波动解释；
+- 怀疑某一实现违反 SP/RS 合同；
+- 审稿人明确要求跨语言逐轨迹保真证据；
+- 需要定位第一次实现分叉事件。
+
+如果开发集已经选出表现稳定的 canonical implementation，后续高维实验可以直接使用该实现，
+无需先完成 portable random tape。
 
 ### 文件
 
@@ -618,7 +640,7 @@ configuration_hash
 ### 冻结流程
 
 1. 生成 development manifest；
-2. 完成 E1/E1B；
+2. 完成 E1；E1B 仅在确有多个可比 comparison implementations 时执行；
 3. 运行 selection 脚本；
 4. 生成 `selection.json`；
 5. 用 selection 生成 confirmatory manifests；
@@ -687,7 +709,7 @@ Rscript scripts/run_smco_evo_highdim_r.R --task path/to/task.json
 2. E1 100 FE/d pilot；
 3. 冻结 wall-time cap；
 4. E1 全 1080 runs；
-5. E1B 最多 600 runs；
+5. 如确有必要，执行可选 E1B（最多 600 runs）；
 6. selection；
 7. 确认性 manifest freeze。
 
@@ -734,6 +756,17 @@ selection tie-break 必须逐条写入报告，不能只输出 winner 名称。
 5. 验证 git commit 和环境信息已记录；
 6. 打印任务数、预计 FE、已完成数和缺失数；
 7. 只执行 manifest 中的 task。
+
+E4 的 manifest 固定为 7 个配置：冻结 winner、matched base，以及
+`DE`、`GA`、`PSO`、`SA`、`GenSA`。runner 不提供可改变 canonical baseline 集合的
+运行时参数；其 `summary` 必须从 instance-level raw results 显式聚合每个
+`(function, dimension, algorithm)` 的 5 个官方 instances，不能覆盖前序 instance。
+
+R winner 不实现 R COCO runner。E4/E5 若接收 R winner，只能执行对应 Python port，
+并在 selection、manifest/provenance、CSV/图表和最终报告中写入
+`python_port_external_check=true`、original winner/language 与实际 Python id；该
+结果不得作为 R winner 的直接外部验证或并入其主结论。Python winner 的 E4/E5 才可
+标作冻结实现的外部验证。
 
 禁止 runner 根据已有结果动态：
 
@@ -829,10 +862,9 @@ statsmodels
 - ERT；
 - ECDF 和 ECDF-AUC；
 - winner vs matched base；
-- Python 内 SP vs RS；
-- R 内 SP vs RS；
-- language x semantics difference-in-differences；
 - paired gain 对 `log(d)` 的维度趋势；
+- 非轴对齐实例上的 winner vs matched base；
+- `n_starts=8` 对 `ceil(sqrt(d))` 的质量和 FE 效率；
 - hierarchical bootstrap 95% CI；
 - Holm 校正；
 - probability of superiority；
@@ -903,7 +935,7 @@ figures/state_component_ablation.*
 
 1. E1 选中了什么，为什么？
 2. E2 上 winner 是否优于 matched base？
-3. SP/RS 哪个更好，是否随语言变化？
+3. 最终使用的语言、代码版本和 state semantics 是什么？
 4. EVO 收益是否随维度增强？
 5. E3 是否优于强基线？
 6. E4 外部基准是否复现主要结论？
@@ -924,8 +956,13 @@ figures/state_component_ablation.*
 .venv/bin/python -m pytest tests/test_highdim_instances.py -v
 .venv/bin/python -m pytest tests/test_experiment_manifests.py -v
 .venv/bin/python -m pytest tests/test_experiment_result_schema.py -v
-.venv/bin/python -m pytest tests/test_cross_language_traces.py -v
 .venv/bin/python -m pytest -q
+```
+
+Task 5 实际启动时再运行：
+
+```bash
+.venv/bin/python -m pytest tests/test_cross_language_traces.py -v
 ```
 
 ### R
@@ -933,6 +970,11 @@ figures/state_component_ablation.*
 ```bash
 Rscript vendor/SMCO_R/main/tests/test_evaluation_budget.R
 Rscript vendor/SMCO_R/main/tests/test_evolution_semantics.R
+```
+
+Task 5 实际启动时再运行：
+
+```bash
 Rscript vendor/SMCO_R/align/evo_trace_r.R --smoke
 ```
 
@@ -960,7 +1002,9 @@ Rscript vendor/SMCO_R/align/evo_trace_r.R --smoke
 
 - Python-SP、Python-RS、R-SP、R-RS 均通过合同测试；
 - 当前 R restart 结果被正确标记；
-- portable trace 能定位差异。
+- Task 5 portable trace 不属于 Gate B 必需条件。
+
+Gate A/B 已于 2026-07-28 通过。
 
 ### Gate C：实例与 manifest
 
@@ -977,7 +1021,7 @@ Rscript vendor/SMCO_R/align/evo_trace_r.R --smoke
 
 ### Gate E：开发选型
 
-- E1/E1B 覆盖完整；
+- E1 覆盖完整；若启用 E1B，其覆盖和选择规则完整；
 - selection tie-break 可复算；
 - `selection.json` 和确认性 manifests 冻结。
 
@@ -991,7 +1035,7 @@ Rscript vendor/SMCO_R/align/evo_trace_r.R --smoke
 
 - 分析可从 raw 重建；
 - 表图与 CSV 一致；
-- selected winner 和完整 2x2 同时报告；
+- selected winner 的选型记录、真实语言和语义完整披露；
 - 文档清楚区分探索、开发和确认性证据。
 
 ## 15. 推荐执行顺序
@@ -999,22 +1043,19 @@ Rscript vendor/SMCO_R/align/evo_trace_r.R --smoke
 严格按以下顺序交给执行智能体：
 
 ```text
-Task 0  结果合同
-  -> Task 1/2  Python/R FE budget
-  -> Gate A
-  -> Task 3/4  Python-RS 与 R-SP
-  -> Gate B
-  -> Task 5    跨语言 trace
+Task 0--4 已完成
+  -> Gate A/B 已通过
   -> Task 6    高维实例
   -> Task 7    manifest
   -> Gate C
-  -> Task 8/9  worker、E0、pilot、E1、E1B
+  -> Task 8/9  worker、pilot、E1（E1B 可选）
   -> Gate D/E
   -> Task 10   E2--E6
   -> Task 11   merge/provenance
   -> Task 12   statistics/figures
   -> Task 13   package/report
   -> Gate F/G
+  -> Task 5    仅在需要时追加跨语言诊断
 ```
 
 不要让多个执行智能体同时修改 `src/smco/optimizer.py` 或
@@ -1035,7 +1076,8 @@ Task 0  结果合同
 4. 高维实验方案；
 5. 当前 `git status`；
 6. 禁止覆盖的结果目录；
-7. 当前 R EVO 是 restart、Python EVO 是 state-preserving 这一事实；
+7. 四种候选实现均已完成；E1 只选一个 canonical implementation，
+   E2 之后不再研究语言差异；
 8. “只在 E1 全局选一次赢家，E2 之后不能改”的规则。
 
 若执行智能体提出改变预算、函数、seed、选择规则或确认性范围，应先修改计划并由用户确认，

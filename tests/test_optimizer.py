@@ -206,6 +206,7 @@ def test_smco_r_evo_runs_zero_buffer_refine_even_when_refine_ratio_is_zero(monke
         use_runmax,
         rng,
         record_history=False,
+        ctx=None,
     ):
         refine_calls.append((float(bounds_buffer), int(iter_max), int(iter_boost)))
         return SingleResult(x_optimal=np.array([0.9]), f_optimal=0.9, iterations=int(iter_nstart))
@@ -328,6 +329,7 @@ def test_run_evolutionary_states_caps_replacement_budget_to_remaining_global_bou
         partial_option,
         use_runmax,
         rng,
+        ctx=None,
     ):
         calls.append((int(state.iter_boost), int(iter_target)))
         state.current_n = int(state.initial_n) + int(iter_target) + 1
@@ -384,6 +386,7 @@ def test_run_evolutionary_states_preserves_survivor_internal_state_across_bounda
         partial_option,
         use_runmax,
         rng,
+        ctx=None,
     ):
         boundary_calls.append((float(state.x_current[0]), float(state.s_value[0]), int(iter_target)))
         if state.birth_iteration == 0 and int(iter_target) == 4:

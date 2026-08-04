@@ -8,7 +8,9 @@ Core Python packages live under `src/`:
 - `tests/`: pytest suites such as `test_optimizer.py`, `test_comparison.py`, and `test_multifidelity.py`.
 - `docs/`: usage notes, benchmark guides, and design/plan records.
 - `scripts/`: reporting and visualization utilities.
-- `vendor/SMCO_R/`: upstream R reference code for comparison only; do not modify unless syncing references.
+- `vendor/SMCO_R/main/`: active R development area (SMCO/SMCO_evo runners, highdim scripts); this is where SMCO-EVO paper R work happens and may be edited.
+- `vendor/SMCO_R/v1.0.0/`: frozen upstream R reference snapshot — do not modify; used only for comparison/syncing.
+- `vendor/SMCO_R/align/`: cross-language trace/random-tape alignment helpers.
 - `result/` and `figures/`: generated experiment outputs and plots.
 
 Important result-producing scripts for the current benchmark workflow:

@@ -5,3 +5,9 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+result/
+instances/
+manifests/
+
+# Fleet 服务器参考（含明文访问凭据，勿提交/推送）
+/docs/smco-fleet-servers.md
