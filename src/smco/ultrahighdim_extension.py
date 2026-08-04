@@ -897,6 +897,53 @@ def _read_json_if_valid(path: Path) -> dict | None:
     return value if isinstance(value, dict) else None
 
 
+_SIGNAL_NAMES = {-1: "SIGHUP", -2: "SIGINT", -9: "SIGKILL", -15: "SIGTERM"}
+
+
+def _signal_name(returncode):
+    """Map a negative subprocess returncode to a signal name, else None."""
+    if returncode is None or returncode >= 0:
+        return None
+    return _SIGNAL_NAMES.get(returncode, f"SIG{-returncode}")
+
+
+def _classify_interruption(returncode, status=None) -> str:
+    """Classify how a worker attempt ended for diagnostics: normal_exit /
+    nonzero_exit / signal / unknown. Diagnostic only -- never overrides the
+    outcome status, so an external interruption is NOT mislabeled as
+    algorithm_failure (2026-08-04 review part 2)."""
+    if returncode is None:
+        return "unknown"
+    if returncode == 0:
+        return "normal_exit"
+    if returncode < 0:
+        return "signal"
+    return "nonzero_exit"
+
+
+def _worker_diagnostics(
+    *, worker_pid, parent_pid, command, started_unix_sec, returncode,
+    recorded_unix_sec,
+) -> dict:
+    """Build the next-round worker diagnostics record. Additive only: existing
+    outcome schema is unchanged, these fields sit alongside it so a future
+    external interruption can be attributed (worker PID/exit/signal) instead
+    of leaving an unexplained open attempt."""
+    command_hash = hashlib.sha256(
+        " ".join(str(c) for c in command).encode("utf-8")
+    ).hexdigest()
+    return {
+        "worker_pid": worker_pid,
+        "parent_pid": parent_pid,
+        "worker_command_sha256": command_hash,
+        "worker_started_unix_sec": started_unix_sec,
+        "worker_exit_code": returncode,
+        "worker_termination_signal": _signal_name(returncode),
+        "interruption_kind": _classify_interruption(returncode),
+        "recorded_unix_sec": recorded_unix_sec,
+    }
+
+
 def _process_resources(pid: int) -> dict:
     resources = {"pid": pid}
     try:
@@ -959,10 +1006,32 @@ def supervise_command(
     stdout_path = attempt_dir / "stdout.log"
     stderr_path = attempt_dir / "stderr.log"
     with open(stdout_path, "w") as stdout_handle, open(stderr_path, "w") as stderr_handle:
-        process = subprocess.Popen(
-            list(command), stdin=subprocess.DEVNULL, stdout=stdout_handle,
-            stderr=stderr_handle, text=True, env=env,
-        )
+        try:
+            process = subprocess.Popen(
+                list(command), stdin=subprocess.DEVNULL, stdout=stdout_handle,
+                stderr=stderr_handle, text=True, env=env,
+            )
+        except OSError as exc:
+            outcome = {
+                "run_id": run_id, "status": "infra_failure", "fe_used": 0,
+                "best_value": None, "normalized_gap": None, "target_hit_fe": {},
+                "failure_reason": f"launch_failure: {exc}",
+            }
+            outcome["machine_id"] = machine_id or socket.gethostname()
+            outcome["git_commit"] = git_commit
+            outcome["environment_hash"] = environment_hash
+            outcome["worker_diagnostics"] = _worker_diagnostics(
+                worker_pid=None, parent_pid=os.getpid(), command=list(command),
+                started_unix_sec=float(started.get("started_unix_sec", 0.0)),
+                returncode=None, recorded_unix_sec=time.time(),
+            )
+            final = reporter.finalize(outcome, elapsed_sec=elapsed_before_attempt)
+            ledger.finish(
+                attempt_id, status="infra_failure",
+                failure_reason=outcome["failure_reason"],
+            )
+            _atomic_write_json(run_dir / "latest_outcome.json", final)
+            return final
         while process.poll() is None:
             elapsed = elapsed_before_attempt + (time.monotonic() - t0)
             progress = _read_json_if_valid(progress_path) or {}
@@ -1001,6 +1070,11 @@ def supervise_command(
     outcome["machine_id"] = machine_id or socket.gethostname()
     outcome["git_commit"] = git_commit
     outcome["environment_hash"] = environment_hash
+    outcome["worker_diagnostics"] = _worker_diagnostics(
+        worker_pid=process.pid, parent_pid=os.getpid(), command=list(command),
+        started_unix_sec=float(started.get("started_unix_sec", 0.0)),
+        returncode=process.returncode, recorded_unix_sec=time.time(),
+    )
     final = reporter.finalize(outcome, elapsed_sec=elapsed)
     evidence_hashes = {}
     for relative in (

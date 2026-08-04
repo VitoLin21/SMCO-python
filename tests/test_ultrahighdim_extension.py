@@ -310,6 +310,52 @@ r.write_text(json.dumps({"run_id": "r1", "status": "success", "fe_used": 10,
                for error in deadline_evidence_errors(outcome, attempt_dir))
 
 
+def test_supervisor_records_worker_exit_diagnostics_normal_and_signal(tmp_path):
+    from smco.ultrahighdim_extension import supervise_command
+    # normal success exit
+    ok = (
+        'import json,os;from pathlib import Path;'
+        'Path(os.environ["SMCO_RESULT_PATH"]).write_text(json.dumps({'
+        '"run_id":"rN","status":"success","fe_used":1,"best_value":1.0,'
+        '"normalized_gap":0.1,"target_hit_fe":{},"wall_time_sec":0.01}))'
+    )
+    out_ok = supervise_command(
+        [sys.executable, "-c", ok], run_id="rN", evidence_root=tmp_path,
+        deadline_sec=10, wall_checkpoints_sec=(5,), poll_interval_sec=0.01,
+        heartbeat_interval_sec=0.01, machine_id="n", git_commit="g", environment_hash="e",
+    )
+    assert out_ok["worker_diagnostics"]["interruption_kind"] == "normal_exit"
+    assert out_ok["worker_diagnostics"]["worker_exit_code"] == 0
+    assert out_ok["worker_diagnostics"]["worker_termination_signal"] is None
+
+    # worker kills itself with SIGTERM (no result written -> infra_failure, but
+    # diagnostics must record the signal, NOT mislabel as algorithm_failure)
+    sig = "import os,time;os.kill(os.getpid(),15);time.sleep(5)"
+    out_sig = supervise_command(
+        [sys.executable, "-c", sig], run_id="rS", evidence_root=tmp_path / "sig",
+        deadline_sec=10, wall_checkpoints_sec=(5,), poll_interval_sec=0.01,
+        heartbeat_interval_sec=0.01, machine_id="n", git_commit="g", environment_hash="e",
+    )
+    assert out_sig["status"] != "algorithm_failure"  # external interruption, not algo
+    assert out_sig["worker_diagnostics"]["interruption_kind"] == "signal"
+    assert out_sig["worker_diagnostics"]["worker_termination_signal"] == "SIGTERM"
+    assert out_sig["worker_diagnostics"]["worker_exit_code"] == -15
+
+
+def test_supervisor_records_launch_failure_when_command_missing(tmp_path):
+    from smco.ultrahighdim_extension import supervise_command
+    out = supervise_command(
+        ["/nonexistent/binary/that/does/not/exist"], run_id="rL", evidence_root=tmp_path,
+        deadline_sec=10, wall_checkpoints_sec=(5,), poll_interval_sec=0.01,
+        heartbeat_interval_sec=0.01, machine_id="n", git_commit="g", environment_hash="e",
+    )
+    assert out["status"] == "infra_failure"
+    assert "launch_failure" in out["failure_reason"]
+    assert out["worker_diagnostics"]["interruption_kind"] == "unknown"
+    assert out["worker_diagnostics"]["worker_exit_code"] is None
+    assert out["worker_diagnostics"]["worker_pid"] is None
+
+
 def test_supervisor_streams_large_worker_output_without_pipe_deadlock(tmp_path):
     code = r'''
 import json, os, sys
