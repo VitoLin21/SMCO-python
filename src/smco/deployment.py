@@ -52,20 +52,23 @@ def git_commit(repo_root) -> str:
 
 def compute_source_manifest(
     repo_root, *, algorithm_core_files=ALGORITHM_CORE_FILES,
-    scheduling_files=SCHEDULING_FILES, git_commit: str | None = None,
+    scheduling_files=SCHEDULING_FILES, commit: str | None = None,
 ) -> dict:
     """Snapshot the source-tree identity at `repo_root`.
 
     `algorithm_core_sha256` covers optimizer/worker/objective files only; a
     change here means results are NOT comparable across the boundary.
     `scheduling_sha256` covers dispatch/recovery and may change without
-    invalidating algorithm results. `git_commit` is injected for testability.
+    invalidating algorithm results. `commit` is injected for testability
+    (the parameter is named `commit`, not `git_commit`, to avoid shadowing
+    the module-level `git_commit` function).
     """
     repo = Path(repo_root)
     core = {rel: file_sha256(repo / rel) for rel in algorithm_core_files}
     sched = {rel: file_sha256(repo / rel) for rel in scheduling_files}
+    resolved = commit if commit is not None else git_commit(repo_root)
     return {
-        "git_commit": git_commit if git_commit is not None else git_commit(repo_root),
+        "git_commit": resolved,
         "algorithm_core": core,
         "algorithm_core_sha256": _combined_sha256(core.values()),
         "scheduling": sched,
