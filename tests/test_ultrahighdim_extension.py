@@ -643,3 +643,35 @@ def test_unsupported_dependency_finish_is_retryable():
     })
     assert not _is_retryable_finish({"status": "success"})
     assert not _is_retryable_finish(None)
+
+
+def test_unsupported_dependency_recovers_via_superseding_attempt_e2e(tmp_path):
+    """End-to-end retry path the R-DEoptim/STOGO fixes rely on: an
+    algorithm_failure carrying unsupported_dependency is classified retryable
+    by plan_extension_dispatch AND AttemptLedger.start creates a superseding
+    attempt (a002) that references a001, preserving the attempt chain (not a
+    bare re-classification). Genuine algorithm_failure stays completed."""
+    from smco.ultrahighdim_extension import plan_extension_dispatch
+
+    # unsupported attempt a001
+    run_u = tmp_path / "rU"
+    ledger_u = AttemptLedger(run_u / "attempt_ledger.json", run_id="rU")
+    a1 = ledger_u.start(machine_id="n", git_commit="g", environment_hash="e")
+    ledger_u.finish(
+        a1["attempt_id"], status="algorithm_failure",
+        failure_reason="unsupported_dependency: R-DEoptim requires R package DEoptim==2.2-8; not installed",
+    )
+    plan = plan_extension_dispatch([{"run_id": "rU"}], tmp_path)
+    assert "rU" in plan["run_ids"]["retryable"]
+    a2 = ledger_u.start(machine_id="n2", git_commit="g", environment_hash="e")
+    assert a2["supersedes_attempt_id"] == a1["attempt_id"]
+    assert len(ledger_u.attempts()) == 2  # a001 preserved + a002 started
+
+    # genuine algorithm_failure stays completed (not retryable, no supersede)
+    run_g = tmp_path / "rG"
+    ledger_g = AttemptLedger(run_g / "attempt_ledger.json", run_id="rG")
+    g1 = ledger_g.start(machine_id="n", git_commit="g", environment_hash="e")
+    ledger_g.finish(g1["attempt_id"], status="algorithm_failure",
+                    failure_reason="nonfinite objective")
+    plan_g = plan_extension_dispatch([{"run_id": "rG"}], tmp_path)
+    assert "rG" in plan_g["run_ids"]["completed"]
